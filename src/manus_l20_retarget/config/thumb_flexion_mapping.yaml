@@ -1,0 +1,52 @@
+schema: manus_l20.thumb_flexion_mapping.v1
+finger: thumb
+command:
+  thumb_natural_open_command:
+  - 156
+  - 255
+  - 255
+  - 255
+  - 255
+  - 128
+  - 163
+  - 129
+  - 86
+  - 62
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  thumb_pinky_root_touch_command:
+  - 99
+  - 255
+  - 255
+  - 255
+  - 255
+  - 0
+  - 163
+  - 129
+  - 86
+  - 62
+  - 222
+  - 255
+  - 255
+  - 255
+  - 255
+  - 100
+  - 255
+  - 255
+  - 255
+  - 255
+samples:
+  thumb_pinky_root_touch:
+    root_rad: 0.022879
+    tip_rad: 1.075898
+  thumb_natural_open:
+    root_rad: 0.004444
+    tip_rad: 0.090306

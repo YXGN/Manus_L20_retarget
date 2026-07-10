@@ -1,0 +1,26 @@
+ROS2/build/
+ROS2/install/
+ROS2/log/
+ROS2/log.txt
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.vscode/
+.idea/
+*.code-workspace
+
+*.bag/
+*.db3
+*.mcap
+
+# ROS/colcon generated outputs at repo root
+build/
+install/
+log/
+log.txt

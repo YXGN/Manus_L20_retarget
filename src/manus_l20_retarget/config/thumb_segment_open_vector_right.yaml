@@ -1,0 +1,7 @@
+schema: manus_l20.thumb_segment_open_vector.v1
+segment_start: 2
+segment_end: 3
+manus_open_vector:
+- -0.01602
+- 0.020709
+- 0.01463

@@ -1,0 +1,2 @@
+src/ManusSDK/lib/*.so filter=lfs diff=lfs merge=lfs -text
+deploy/manus-calibration/lib/libManusSDK_Integrated.so filter=lfs diff=lfs merge=lfs -text
