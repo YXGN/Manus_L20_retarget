@@ -125,6 +125,14 @@ ClientReturnCode ManusDataPublisher::InitializeSDK()
         return ClientReturnCode::ClientReturnCode_FailedToInitialize;
     }
 
+    const SDKReturnCode t_SessionResult = CoreSdk_SetSessionType(SessionType::SessionType_CoreSDK);
+    if (t_SessionResult != SDKReturnCode::SDKReturnCode_Success &&
+        t_SessionResult != SDKReturnCode::SDKReturnCode_FunctionCalledAtWrongTime)
+    {
+        ClientLog::error("Failed to set MANUS SDK session type to CoreSDK. The value returned was {}.", (int32_t)t_SessionResult);
+        return ClientReturnCode::ClientReturnCode_FailedToInitialize;
+    }
+
     const ClientReturnCode t_CallBackResults = RegisterAllCallbacks();
     if (t_CallBackResults != ::ClientReturnCode::ClientReturnCode_Success)
     {
@@ -256,34 +264,86 @@ void ManusDataPublisher::PublishCallback()
         return;
     }
 
+    static bool s_LandscapeStatusShown = false;
+    static bool s_NoDongleWarningShown = false;
     static bool s_LicenseErrorShown = false;
 
-    if (!s_LicenseErrorShown)
+    if (!s_LandscapeStatusShown)
     {
-        if (m_Landscape->gloveDevices.dongleCount == 0)
+        ClientLog::print(
+            "MANUS landscape: dongles={}, gloves={}, users={}, license.sdk={}, license.integrated={}, maxGlovePairs={}",
+            m_Landscape->gloveDevices.dongleCount,
+            m_Landscape->gloveDevices.gloveCount,
+            m_Landscape->users.userCount,
+            m_Landscape->settings.license.sdk,
+            m_Landscape->settings.license.integrated,
+            m_Landscape->settings.license.maxGlovePairs);
+
+        for (uint32_t i = 0; i < m_Landscape->gloveDevices.dongleCount; ++i)
         {
-            return;
+            const auto& dongle = m_Landscape->gloveDevices.dongles[i];
+            ClientLog::print(
+                "MANUS dongle[{}]: id={}, licenseType={}, licenseLevel={}, maxPairs={}, leftGloveID={}, rightGloveID={}",
+                i,
+                dongle.id,
+                dongle.licenseType,
+                (int32_t)dongle.licenseLevel,
+                dongle.licenseMaxNumberOfGlovePairs,
+                dongle.leftGloveID,
+                dongle.rightGloveID);
         }
 
-        if (m_ConnectionType != ConnectionType::ConnectionType_Integrated)
+        for (uint32_t i = 0; i < m_Landscape->gloveDevices.gloveCount; ++i)
         {
-            if (!m_Landscape->settings.license.sdk)
+            const auto& glove = m_Landscape->gloveDevices.gloves[i];
+            ClientLog::print(
+                "MANUS glove[{}]: id={}, side={}, dongleID={}, pairedState={}, battery={}%, signal={}",
+                i,
+                glove.id,
+                SideToString(glove.side),
+                glove.dongleID,
+                (int32_t)glove.pairedState,
+                glove.batteryPercentage,
+                glove.transmissionStrength);
+        }
+        s_LandscapeStatusShown = true;
+    }
+
+    if (m_Landscape->gloveDevices.dongleCount == 0)
+    {
+        if (!s_NoDongleWarningShown)
+        {
+            ClientLog::warn("MANUS landscape has no dongles yet; check Sensor Dongle pairing/visibility in MANUS Core.");
+            s_NoDongleWarningShown = true;
+        }
+        return;
+    }
+
+    if (m_ConnectionType != ConnectionType::ConnectionType_Integrated)
+    {
+        if (!m_Landscape->settings.license.sdk)
+        {
+            if (!s_LicenseErrorShown)
             {
                 ClientLog::error("It looks like you don't have a valid SDK license. Please connect a valid license key.");
                 s_LicenseErrorShown = true;
-                return;
             }
+            return;
         }
-        else
+    }
+    else
+    {
+        if (!m_Landscape->settings.license.integrated)
         {
-            if (!m_Landscape->settings.license.integrated)
+            if (!s_LicenseErrorShown)
             {
                 ClientLog::error("It looks like you don't have a valid SDK Integrated license. Please connect a valid license key.");
                 s_LicenseErrorShown = true;
-                return;
             }
+            return;
         }
     }
+
     for (size_t i = 0; i < m_Landscape->gloveDevices.gloveCount; i++)
     {
         manus_ros2_msgs::msg::ManusGlove t_Msg;
