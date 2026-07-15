@@ -1,0 +1,111 @@
+schema: manus_l20.flexion_calibration.v1
+# Left-hand finger flexion calibration.
+#
+# This file maps MANUS finger bending angles to L20/G20 root/tip motor commands.
+# It is used by flexion_calibration_path in the left-hand launch.
+#
+# finger_order defines the array order used below:
+#   0 thumb, 1 index, 2 middle, 3 ring, 4 pinky
+#
+# root_flexion_*_rad:
+#   MANUS angle at landmarks[MCP]-[PIP]-[DIP].
+#   For four fingers this drives command slots 1-4.
+#
+# tip_flexion_*_rad:
+#   MANUS angle at landmarks[PIP]-[DIP]-[TIP].
+#   For four fingers this drives command slots 16-19.
+#
+# For the thumb, root/tip flexion is handled by thumb_left_flexion_mapping.yaml,
+# so this file keeps the thumb open/closed values equal for mapping purposes.
+finger_order:
+- thumb
+- index
+- middle
+- ring
+- pinky
+root_flexion_open_rad: &id001
+- 0.009567
+- 0.229345
+- 0.195075
+- 0.22362
+- 0.433639
+root_flexion_closed_rad:
+- 0.009567
+- 1.647136
+- 1.66153
+- 1.48844
+- 1.354355
+tip_flexion_open_rad: &id002
+- 0.30636
+- 0.041142
+- 0.344438
+- 0.229829
+- 0.003513
+tip_flexion_closed_rad:
+- 0.30636
+- 1.578982
+- 1.811015
+- 1.749279
+- 1.066243
+command:
+  open_command:
+  - 255  # 0  Thumb Base
+  - 255  # 1  Index Base
+  - 255  # 2  Middle Base
+  - 255  # 3  Ring Base
+  - 255  # 4  Pinky Base
+  - 128  # 5  Thumb Roll
+  - 163  # 6  Index Yaw
+  - 129  # 7  Middle Yaw
+  - 86   # 8  Ring Yaw
+  - 62   # 9  Pinky Yaw
+  - 255  # 10  Thumb Yaw
+  - 255  # 11  Reserved
+  - 255  # 12  Reserved
+  - 255  # 13  Reserved
+  - 255  # 14  Reserved
+  - 255  # 15  Thumb Tip
+  - 255  # 16  Index Tip
+  - 255  # 17  Middle Tip
+  - 255  # 18  Ring Tip
+  - 255  # 19  Pinky Tip
+  four_finger_closed_command:
+  - 187  # 0  Thumb Base
+  - 13   # 1  Index Base
+  - 0    # 2  Middle Base
+  - 5    # 3  Ring Base
+  - 15   # 4  Pinky Base
+  - 128  # 5  Thumb Roll
+  - 128  # 6  Index Yaw
+  - 128  # 7  Middle Yaw
+  - 128  # 8  Ring Yaw
+  - 128  # 9  Pinky Yaw
+  - 255  # 10  Thumb Yaw
+  - 255  # 11  Reserved
+  - 255  # 12  Reserved
+  - 255  # 13  Reserved
+  - 255  # 14  Reserved
+  - 110  # 15  Thumb Tip
+  - 12   # 16  Index Tip
+  - 12   # 17  Middle Tip
+  - 2    # 18  Ring Tip
+  - 15   # 19  Pinky Tip
+samples:
+  # Raw MANUS angles captured at the open pose.
+  open:
+    root_rad: *id001
+    tip_rad: *id002
+  # Raw MANUS angles captured at the four-finger-fist pose.
+  four_finger_fist:
+    root_rad:
+    - 0.000206
+    - 1.647136
+    - 1.66153
+    - 1.48844
+    - 1.354355
+    tip_rad:
+    - 0.005229
+    - 1.578982
+    - 1.811015
+    - 1.749279
+    - 1.066243

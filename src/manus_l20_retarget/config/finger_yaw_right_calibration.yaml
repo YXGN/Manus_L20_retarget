@@ -1,0 +1,238 @@
+schema: manus_l20.finger_yaw_calibration.v1
+# Right-hand four-finger yaw calibration.
+#
+# This file maps MANUS four-finger side-splay values to L20/G20 yaw commands.
+# finger_order defines the command/angle array order:
+#   0 index, 1 middle, 2 ring, 3 pinky
+#
+# source is the selected MANUS yaw feature used at runtime.
+# source_mode records how the capture script chose it.
+# source_ranges shows the open-to-close/spread motion range for each candidate.
+#
+finger_order:
+- index
+- middle
+- ring
+- pinky
+source: pip_orientation
+source_mode: auto_orientation
+source_ranges:
+  # Candidate yaw-feature ranges measured during capture. Larger and cleaner
+  # ranges are usually better; auto_orientation selects from orientation sources.
+  pip:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  dip:
+  - 0.118632
+  - 0.018698
+  - 0.094271
+  - 0.178409
+  tip:
+  - 0.129656
+  - 0.017699
+  - 0.103035
+  - 0.211547
+  mcp_orientation:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  pip_orientation:
+  - 0.256019
+  - 0.033496
+  - 0.199002
+  - 0.437091
+  ip_orientation:
+  - 0.254761
+  - 0.033096
+  - 0.19847
+  - 0.437105
+  dip_orientation:
+  - 0.20839
+  - 0.018238
+  - 0.180303
+  - 0.437019
+command:
+  natural_open_command:
+  - 255  # 0  Thumb Base
+  - 255  # 1  Index Base
+  - 255  # 2  Middle Base
+  - 255  # 3  Ring Base
+  - 255  # 4  Pinky Base
+  - 128  # 5  Thumb Roll
+  - 163  # 6  Index Yaw
+  - 129  # 7  Middle Yaw
+  - 86   # 8  Ring Yaw
+  - 62   # 9  Pinky Yaw
+  - 180  # 10  Thumb Yaw
+  - 255  # 11  Reserved
+  - 255  # 12  Reserved
+  - 255  # 13  Reserved
+  - 255  # 14  Reserved
+  - 255  # 15  Thumb Tip
+  - 255  # 16  Index Tip
+  - 255  # 17  Middle Tip
+  - 255  # 18  Ring Tip
+  - 255  # 19  Pinky Tip
+  finger_close_command:
+  - 255  # 0  Thumb Base
+  - 255  # 1  Index Base
+  - 255  # 2  Middle Base
+  - 255  # 3  Ring Base
+  - 255  # 4  Pinky Base
+  - 128  # 5  Thumb Roll
+  - 60   # 6  Index Yaw
+  - 85   # 7  Middle Yaw
+  - 136  # 8  Ring Yaw
+  - 166  # 9  Pinky Yaw
+  - 255  # 10  Thumb Yaw
+  - 255  # 11  Reserved
+  - 255  # 12  Reserved
+  - 255  # 13  Reserved
+  - 255  # 14  Reserved
+  - 255  # 15  Thumb Tip
+  - 255  # 16  Index Tip
+  - 255  # 17  Middle Tip
+  - 255  # 18  Ring Tip
+  - 255  # 19  Pinky Tip
+  finger_spread_command:
+  - 255  # 0  Thumb Base
+  - 255  # 1  Index Base
+  - 255  # 2  Middle Base
+  - 255  # 3  Ring Base
+  - 255  # 4  Pinky Base
+  - 128  # 5  Thumb Roll
+  - 255  # 6  Index Yaw
+  - 169  # 7  Middle Yaw
+  - 46   # 8  Ring Yaw
+  - 0    # 9  Pinky Yaw
+  - 255  # 10  Thumb Yaw
+  - 255  # 11  Reserved
+  - 255  # 12  Reserved
+  - 255  # 13  Reserved
+  - 255  # 14  Reserved
+  - 255  # 15  Thumb Tip
+  - 255  # 16  Index Tip
+  - 255  # 17  Middle Tip
+  - 255  # 18  Ring Tip
+  - 255  # 19  Pinky Tip
+samples:
+  # Captured MANUS yaw features at the natural-open pose.
+  natural_open:
+    yaw_rad: &id001
+    - 0.040562
+    - 0.212734
+    - 0.272521
+    - 0.443002
+    all_yaw_rad:
+      pip:
+      - -0.182199
+      - -0.064909
+      - 0.06258
+      - 0.19901
+      dip:
+      - -0.204801
+      - -0.059657
+      - 0.033461
+      - 0.18991
+      tip:
+      - -0.207545
+      - -0.056985
+      - 0.024265
+      - 0.188115
+      mcp_orientation:
+      - 0.100028
+      - 0.219237
+      - 0.345511
+      - 0.479932
+      pip_orientation: *id001
+      ip_orientation:
+      - 0.040626
+      - 0.213019
+      - 0.271213
+      - 0.442994
+      dip_orientation:
+      - 0.044881
+      - 0.223495
+      - 0.240836
+      - 0.443689
+  # Captured MANUS yaw features at the finger-close pose.
+  finger_close:
+    yaw_rad: &id002
+    - 0.296581
+    - 0.24623
+    - 0.208732
+    - 0.074588
+    all_yaw_rad:
+      pip:
+      - -0.182199
+      - -0.064909
+      - 0.06258
+      - 0.19901
+      dip:
+      - -0.086169
+      - -0.040959
+      - 0.003766
+      - 0.048307
+      tip:
+      - -0.077889
+      - -0.039286
+      - -0.017459
+      - 0.014826
+      mcp_orientation:
+      - 0.100028
+      - 0.219237
+      - 0.345511
+      - 0.479932
+      pip_orientation: *id002
+      ip_orientation:
+      - 0.295387
+      - 0.246115
+      - 0.206088
+      - 0.074618
+      dip_orientation:
+      - 0.253271
+      - 0.241733
+      - 0.132308
+      - 0.076348
+  # Captured MANUS yaw features at the finger-spread pose.
+  finger_spread:
+    yaw_rad: &id003
+    - -0.076781
+    - 0.239079
+    - 0.471523
+    - 0.880093
+    all_yaw_rad:
+      pip:
+      - -0.182199
+      - -0.064909
+      - 0.06258
+      - 0.19901
+      dip:
+      - -0.262124
+      - -0.052985
+      - 0.127732
+      - 0.368319
+      tip:
+      - -0.277863
+      - -0.054666
+      - 0.1273
+      - 0.399662
+      mcp_orientation:
+      - 0.100028
+      - 0.219237
+      - 0.345511
+      - 0.479932
+      pip_orientation: *id003
+      ip_orientation:
+      - -0.077389
+      - 0.238751
+      - 0.469683
+      - 0.880099
+      dip_orientation:
+      - -0.104664
+      - 0.220674
+      - 0.421139
+      - 0.880708
