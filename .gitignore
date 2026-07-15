@@ -1,0 +1,29 @@
+build/
+install/
+log/
+log.txt
+
+# MANUS SDK shared libraries are larger than GitHub's normal file limit.
+# Keep them locally under src/ManusSDK/lib/ or use Git LFS before tracking.
+src/ManusSDK/lib/*.so
+
+ROS2/build/
+ROS2/install/
+ROS2/log/
+ROS2/log.txt
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.vscode/
+.idea/
+*.code-workspace
+
+*.bag/
+*.db3
+*.mcap
