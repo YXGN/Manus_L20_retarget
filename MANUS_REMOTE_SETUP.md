@@ -22,6 +22,7 @@ rsync -avz --delete \
 cd ~/agx_arm_ws/src/Manus_L20_retarget
 rm -rf build install log
 
+./scripts/fetch_manus_sdk.sh
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash
@@ -130,4 +131,3 @@ Interpretation:
 - `/manus_glove_0` missing: MANUS dongle/license/glove side.
 - `/manus_glove_0` exists but `/cb_right_hand_control_cmd` missing: retarget side.
 - command exists but hand does not move: CAN/L20 driver side.
-

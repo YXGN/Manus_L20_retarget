@@ -20,22 +20,18 @@ target_include_directories(manus_data_publisher PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ./../ManusSDK/include)
-target_link_directories(manus_data_publisher PRIVATE ./../ManusSDK/lib/)
-
-# Use the integrated SDK on Linux so the ROS2 publisher does not require
-# MANUS Core remote-mode GRPC / Protobuf runtime libraries.
-target_link_libraries(manus_data_publisher ManusSDK_Integrated ncurses)
+set(MANUS_SDK_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/../ManusSDK/lib/libManusSDK_Integrated.so)
+if(NOT EXISTS ${MANUS_SDK_LIBRARY})
+  message(FATAL_ERROR "MANUS SDK is missing. Run ./scripts/fetch_manus_sdk.sh first.")
+endif()
+target_link_libraries(manus_data_publisher ${MANUS_SDK_LIBRARY} ncurses)
 
 target_compile_features(manus_data_publisher PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 
 install(TARGETS manus_data_publisher
   DESTINATION lib/${PROJECT_NAME})
 
-set(LIBRARY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/${MANUS_LINUX_PATH}./../ManusSDK/lib)
-
-set(LIBRARY_FILE ${LIBRARY_DIR}/libManusSDK_Integrated.so)
-
-install(FILES ${LIBRARY_FILE} DESTINATION lib/${PROJECT_NAME})
+install(FILES ${MANUS_SDK_LIBRARY} DESTINATION lib/${PROJECT_NAME})
 
 set_target_properties(manus_data_publisher PROPERTIES INSTALL_RPATH "$ORIGIN")
 

@@ -37,10 +37,15 @@ MANUS Metagloves
 
 ```bash
 cd <Manus_L20_retarget>
+./scripts/fetch_manus_sdk.sh
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash
 ```
+
+The repository intentionally does not download MANUS SDK binaries during a
+normal clone. `fetch_manus_sdk.sh` downloads only the Integrated SDK required
+by `manus_ros2`.
 
 ## Run
 
