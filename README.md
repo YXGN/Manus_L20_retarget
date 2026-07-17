@@ -44,6 +44,12 @@ source install/setup.bash
 
 ## Run
 
+New user calibration and teleoperation SOP:
+
+```text
+MANUS_L20_TELEOP_SOP.md
+```
+
 Right hand only:
 
 ```bash

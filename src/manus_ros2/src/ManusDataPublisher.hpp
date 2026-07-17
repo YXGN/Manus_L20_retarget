@@ -7,6 +7,9 @@
 #include <vector>
 #include <memory>
 #include <deque>
+#include <map>
+#include <set>
+#include <string>
 
 #include "rclcpp/rclcpp.hpp"
 #include "manus_ros2_msgs/msg/manus_ergonomics.hpp"
@@ -86,7 +89,7 @@ public:
 
     static void OnRawDeviceDataStreamCallback(
         const RawDeviceDataInfo *const p_RawDeviceDataInfo);
-    
+
     static void OnErgonomicsStreamCallback(
         const ErgonomicsStream *const p_ErgonomicsStream);
 
@@ -95,67 +98,79 @@ public:
 
     void PublishCallback();
 
-    
-    
+
+
 protected:
     ClientReturnCode Connect();
-    
+
     std::string SideToString(Side p_Side);
-    
+
     std::string JointTypeToString(FingerJointType p_FingerJointType);
-    
+
     std::string ChainTypeToString(ChainType p_ChainType);
-    
+
     Side ErgonomicsDataTypeToSide(ErgonomicsDataType p_ErgonomicsDataType);
-    
+
     std::string ErgonomicsDataTypeToString(ErgonomicsDataType p_ErgonomicsDataType);
-    
+
     // Helper to (re)create vibration subscribers for all known gloves
     void UpdateVibrationSubscribers();
-    
+
     // Callback for vibration command
     void OnVibrationCommand(const manus_ros2_msgs::msg::ManusVibrationCommand::SharedPtr msg, uint32_t glove_id);
-    
+
     GloveLandscapeData GetGloveLandscapeData(uint32_t p_GloveID);
 
+    void LoadConfiguredGloveCalibration(uint32_t p_GloveID, Side p_Side);
+
+    bool LoadGloveCalibrationFromFile(uint32_t p_GloveID, const std::string& p_CalibrationFilePath);
+
     static ManusDataPublisher *s_Instance;
-    
+
     //Connection type in case of remote m_IP is used, if empty auto discovery is used
     ConnectionType m_ConnectionType = ConnectionType::ConnectionType_Integrated;
     std::string m_Ip = "";
-    
+
     //Coordinate system settings
     bool m_WorldSpace = true;
     CoordinateSystemVUH m_CoordinateSystem = {AxisView::AxisView_XFromViewer, AxisPolarity::AxisPolarity_PositiveZ, Side::Side_Right, 1.0f};
     HandMotion m_HandMotion = HandMotion::HandMotion_None;
-    
+
     std::map<uint32_t, rclcpp::Publisher<manus_ros2_msgs::msg::ManusGlove>::SharedPtr> m_GlovePublisher;
-    
+
     std::mutex m_RawSkeletonMutex;
     std::map<uint32_t, ClientRawSkeleton> m_GloveDataMap;
     NodeInfo* m_NodeInfo = nullptr;
-    
+
     //Add raw sensor data
     std::mutex m_RawSensorDataMutex;
     std::map<uint32_t, RawDeviceData> m_RawSensorDataMap;
-    
+
     //Add ergonomics data
     std::mutex m_ErgonomicsMutex;
     std::map<uint32_t, ErgonomicsData> m_ErgonomicsDataMap;
-    
+
     //Landscape data
     std::mutex m_LandscapeMutex;
     Landscape* m_NewLandscape = nullptr;
     Landscape* m_Landscape = nullptr;
     std::vector<GestureLandscapeData> m_NewGestureLandscapeData;
     std::vector<GestureLandscapeData> m_GestureLandscapeData;
-    
+
     // Vibration command subscribers, mapped by glove_id
     std::map<uint32_t, rclcpp::Subscription<manus_ros2_msgs::msg::ManusVibrationCommand>::SharedPtr> m_VibrationSubscribers;
-    
+    std::set<uint32_t> m_ForcedVibrationWarnedGloves;
+    std::set<uint32_t> m_VibrationSuccessLoggedGloves;
+
+    bool m_LoadCalibration = true;
+    std::string m_LeftCalibrationPath;
+    std::string m_RightCalibrationPath;
+    std::set<uint32_t> m_CalibratedGloves;
+    std::set<uint32_t> m_CalibrationMissingWarnedGloves;
+
     // MANUS message publishers
     rclcpp::TimerBase::SharedPtr m_PublishTimer;
-    
+
     std::map<uint32_t, int> m_PublishCountMap;
     std::chrono::steady_clock::time_point m_LastLogTime;
 };
