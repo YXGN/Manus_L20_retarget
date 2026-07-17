@@ -1,14 +1,32 @@
 #include "ManusDataPublisher.hpp"
 #include "ManusSDKTypes.h"
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <set>
 
 #include "ClientLogging.hpp"
 
 using ManusSDK::ClientLog;
 using namespace std::chrono_literals;
+
+namespace
+{
+std::string GloveTopicNameForSide(Side p_Side)
+{
+    switch (p_Side)
+    {
+    case Side_Right:
+        return "manus_glove_0";
+    case Side_Left:
+        return "manus_glove_1";
+    default:
+        return "manus_glove_invalid";
+    }
+}
+}
 
 ManusDataPublisher *ManusDataPublisher::s_Instance = nullptr;
 
@@ -23,6 +41,10 @@ ManusDataPublisher::ManusDataPublisher() : Node("manus_data_publisher")
     // Initialize static variables
     m_LastLogTime = std::chrono::steady_clock::now();
     m_PublishCountMap.clear();
+
+    m_LoadCalibration = this->declare_parameter<bool>("load_calibration", true);
+    m_LeftCalibrationPath = this->declare_parameter<std::string>("left_calibration_path", "");
+    m_RightCalibrationPath = this->declare_parameter<std::string>("right_calibration_path", "");
 
     // Timer to publish the data
     m_PublishTimer = create_wall_timer(8.333333ms, [this]
@@ -290,6 +312,8 @@ void ManusDataPublisher::PublishCallback()
         t_Msg.glove_id = m_Landscape->gloveDevices.gloves[i].id;
         t_Msg.side = SideToString(m_Landscape->gloveDevices.gloves[i].side);
 
+        LoadConfiguredGloveCalibration(t_Msg.glove_id, m_Landscape->gloveDevices.gloves[i].side);
+
         if (t_GloveDataMap.find(t_Msg.glove_id) == t_GloveDataMap.end())
         {
             continue;
@@ -395,9 +419,10 @@ void ManusDataPublisher::PublishCallback()
         auto t_Publisher = m_GlovePublisher.find(t_Msg.glove_id);
         if (t_Publisher == m_GlovePublisher.end())
         {
-            std::string topic_name = "manus_glove_" + std::to_string(m_GlovePublisher.size());
+            std::string topic_name = GloveTopicNameForSide(m_Landscape->gloveDevices.gloves[i].side);
             auto t_NewPublisher = this->create_publisher<manus_ros2_msgs::msg::ManusGlove>(topic_name, 10);
             t_Publisher = m_GlovePublisher.emplace(t_Msg.glove_id, t_NewPublisher).first;
+            ClientLog::print("Publishing glove_id {} side {} on topic {}", t_Msg.glove_id, t_Msg.side.c_str(), topic_name.c_str());
             // (Re)create vibration subscribers for all gloves
             UpdateVibrationSubscribers();
         }
@@ -582,7 +607,8 @@ void ManusDataPublisher::UpdateVibrationSubscribers()
     for (const auto &entry : m_GlovePublisher)
     {
         uint32_t glove_id = entry.first;
-        std::string topic_name = "manus_glove_" + std::to_string(std::distance(m_GlovePublisher.begin(), m_GlovePublisher.find(glove_id))) + "/vibration_cmd";
+        GloveLandscapeData t_LandscapeData = GetGloveLandscapeData(glove_id);
+        std::string topic_name = GloveTopicNameForSide(t_LandscapeData.side) + "/vibration_cmd";
         // Only create if not already present
         if (m_VibrationSubscribers.find(glove_id) == m_VibrationSubscribers.end())
         {
@@ -616,8 +642,10 @@ void ManusDataPublisher::OnVibrationCommand(const manus_ros2_msgs::msg::ManusVib
     GloveLandscapeData t_LandscapeData = GetGloveLandscapeData(glove_id);
     if (!t_LandscapeData.isHaptics)
     {
-        // Not a haptics glove or missing in landscape, so no reason to send vibration command
-        return;
+        if (m_ForcedVibrationWarnedGloves.insert(glove_id).second)
+        {
+            ClientLog::print("Forcing vibration command to glove {} even though SDK reports isHaptics=false", glove_id);
+        }
     }
 
     SDKReturnCode result = CoreSdk_VibrateFingersForGlove(glove_id, intensities);
@@ -627,8 +655,88 @@ void ManusDataPublisher::OnVibrationCommand(const manus_ros2_msgs::msg::ManusVib
     }
     else
     {
-        ClientLog::print("Vibration command sent to glove {}", glove_id);
+        if (m_VibrationSuccessLoggedGloves.insert(glove_id).second)
+        {
+            ClientLog::print("Vibration command sent to glove {}", glove_id);
+        }
     }
+}
+
+void ManusDataPublisher::LoadConfiguredGloveCalibration(uint32_t p_GloveID, Side p_Side)
+{
+    if (!m_LoadCalibration || p_GloveID == 0 || m_CalibratedGloves.count(p_GloveID) > 0)
+    {
+        return;
+    }
+
+    const std::string& t_Path = p_Side == Side_Left ? m_LeftCalibrationPath : m_RightCalibrationPath;
+    if (t_Path.empty())
+    {
+        m_CalibratedGloves.insert(p_GloveID);
+        return;
+    }
+
+    if (LoadGloveCalibrationFromFile(p_GloveID, t_Path))
+    {
+        m_CalibratedGloves.insert(p_GloveID);
+    }
+    else if (m_CalibrationMissingWarnedGloves.insert(p_GloveID).second)
+    {
+        ClientLog::warn("Glove calibration not loaded for glove {} from {}", p_GloveID, t_Path.c_str());
+        m_CalibratedGloves.insert(p_GloveID);
+    }
+}
+
+bool ManusDataPublisher::LoadGloveCalibrationFromFile(uint32_t p_GloveID, const std::string& p_CalibrationFilePath)
+{
+    const std::filesystem::path t_Path(p_CalibrationFilePath);
+    if (!std::filesystem::exists(t_Path))
+    {
+        return false;
+    }
+
+    std::ifstream t_File(t_Path, std::ios::binary | std::ios::ate);
+    if (!t_File)
+    {
+        return false;
+    }
+
+    std::streamsize t_FileLength = t_File.tellg();
+    if (t_FileLength <= 0)
+    {
+        return false;
+    }
+    t_File.seekg(0, std::ios::beg);
+
+    std::vector<unsigned char> t_CalibrationData(static_cast<size_t>(t_FileLength));
+    if (!t_File.read(reinterpret_cast<char*>(t_CalibrationData.data()), t_FileLength))
+    {
+        return false;
+    }
+
+    SetGloveCalibrationReturnCode t_Result;
+    SDKReturnCode t_SetResult = CoreSdk_SetGloveCalibration(
+        p_GloveID,
+        t_CalibrationData.data(),
+        static_cast<uint32_t>(t_CalibrationData.size()),
+        &t_Result);
+
+    if (t_SetResult != SDKReturnCode::SDKReturnCode_Success)
+    {
+        ClientLog::error(
+            "Failed to apply glove calibration for glove {} from {}: SDK error {}",
+            p_GloveID,
+            p_CalibrationFilePath.c_str(),
+            static_cast<int>(t_SetResult));
+        return false;
+    }
+
+    ClientLog::print(
+        "Loaded glove calibration for glove {} from {} (result {})",
+        p_GloveID,
+        p_CalibrationFilePath.c_str(),
+        static_cast<int>(t_Result));
+    return true;
 }
 
 GloveLandscapeData ManusDataPublisher::GetGloveLandscapeData(uint32_t p_GloveID)
@@ -637,7 +745,7 @@ GloveLandscapeData ManusDataPublisher::GetGloveLandscapeData(uint32_t p_GloveID)
 
     if (m_Landscape == nullptr)
     {
-        GloveLandscapeData t_Empty;
+        GloveLandscapeData t_Empty{};
         return t_Empty;
     }
 
@@ -649,7 +757,7 @@ GloveLandscapeData ManusDataPublisher::GetGloveLandscapeData(uint32_t p_GloveID)
         }
     }
 
-    GloveLandscapeData t_Empty;
+    GloveLandscapeData t_Empty{};
     return t_Empty;
 }
 

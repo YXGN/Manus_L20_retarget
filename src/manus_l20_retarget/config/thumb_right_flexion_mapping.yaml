@@ -9,7 +9,7 @@ command:
   - 255  # 2  Middle Base
   - 255  # 3  Ring Base
   - 255  # 4  Pinky Base
-  - 128  # 5  Thumb Roll
+  - 150  # 5  Thumb Roll
   - 163  # 6  Index Yaw
   - 129  # 7  Middle Yaw
   - 86   # 8  Ring Yaw

@@ -1,0 +1,48 @@
+# Minimal four-finger MANUS ergonomics -> L20 command mapping.
+#
+# This intentionally does not use the Revo-style joint-angle YAML. Four-finger
+# root and tip slots are mapped directly:
+#   MANUS open ergonomics value  -> L20 byte 255
+#   MANUS closed ergonomics value -> L20 byte 0
+#
+# L20 slots:
+#   1..4   index/middle/ring/pinky root
+#   16..19 index/middle/ring/pinky tip
+
+input:
+  side: right
+
+l20_command:
+  direct_ergonomics_mapping: true
+  ergonomics_ranges:
+    index:
+      root_key: IndexMCPStretch
+      root_range: [0.0, 85.0]
+      tip_key: IndexPIPStretch
+      tip_range: [0.0, 75.0]
+    middle:
+      root_key: MiddleMCPStretch
+      root_range: [0.0, 80.0]
+      tip_key: MiddlePIPStretch
+      tip_range: [0.0, 90.0]
+    ring:
+      root_key: RingMCPStretch
+      root_range: [0.0, 75.0]
+      tip_key: RingPIPStretch
+      tip_range: [0.0, 90.0]
+    pinky:
+      root_key: PinkyMCPStretch
+      root_range: [0.0, 60.0]
+      tip_key: PinkyPIPStretch
+      tip_range: [0.0, 80.0]
+
+  neutral_command: [255, 255, 255, 255, 255, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 255, 255, 255, 255]
+  open_command: [255, 255, 255, 255, 255, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 255, 255, 255, 255]
+  closed_command: [255, 0, 0, 0, 0, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 0, 0, 0, 0]
+  min_command: [255, 0, 0, 0, 0, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 0, 0, 0, 0]
+  max_command: [255, 255, 255, 255, 255, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 255, 255, 255, 255]
+
+smoothing:
+  lowpass_alpha: 0.45
+  max_delta_per_cycle: 10
+  interpolation_hz: 120.0

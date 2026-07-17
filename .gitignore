@@ -6,6 +6,14 @@ log.txt
 # MANUS SDK shared libraries are larger than GitHub's normal file limit.
 # Keep them locally under src/ManusSDK/lib/ or use Git LFS before tracking.
 src/ManusSDK/lib/*.so
+src/ManusSDK/sharpa-manus-sdk-main/
+src/sharpa-manus-sdk-main/
+src/Revo-Retargeting-main/
+src/manus-linkerhand-bridge-feat-init/
+src/manus_ros2/calibration/*.mcal
+src/manus_ros2/calibration/*.bak
+**/CalibrationGUI/CalibrationGUI.out
+**/CalibrationGUI/objects/
 
 ROS2/build/
 ROS2/install/

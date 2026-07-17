@@ -8,6 +8,7 @@ from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def _workspace_root() -> Path:
@@ -53,7 +54,13 @@ def _thumb_flexion_config_name(hand_type: str) -> str:
     return "thumb_left_flexion_mapping.yaml" if hand_type == "left" else "thumb_right_flexion_mapping.yaml"
 
 
+def _manus_calibration_file(hand_type: str) -> str:
+    return str(_SRC / "manus_ros2" / "calibration" / f"Calibration_{hand_type}.mcal")
+
+
 def _thumb_segment_frame_default(hand_type: str):
+    if hand_type == "right":
+        return ""
     return _config_file(f"thumb_segment_frame_{hand_type}.yaml")
 
 
@@ -122,6 +129,14 @@ def _hand_actions(
     l20_thumb_ik_root,
     l20_thumb_ik_config_path,
     linkerhand_sdk_root,
+    enable_haptics,
+    mock_tactile,
+    haptic_glove_id,
+    haptic_force_topic,
+    haptic_vib_topic,
+    haptic_poll_rate_hz,
+    haptic_read_mode,
+    haptic_normal_force_full_scale,
 ):
     if hand_type not in {"left", "right"}:
         raise ValueError(f"hand_type must be left or right, got {hand_type!r}")
@@ -195,6 +210,40 @@ def _hand_actions(
                 }
             ],
         ),
+        Node(
+            package="manus_l20_haptics",
+            executable="tactile_source_node",
+            name=f"linkerhand_l20_tactile_source_{hand_type}",
+            output="screen",
+            condition=IfCondition(enable_haptics),
+            parameters=[
+                {
+                    "enabled": True,
+                    "mock": mock_tactile,
+                    "hand_joint": "L20",
+                    "hand_type": hand_type,
+                    "can_channel": can,
+                    "poll_rate_hz": haptic_poll_rate_hz,
+                    "force_topic": haptic_force_topic,
+                    "read_mode": haptic_read_mode,
+                }
+            ],
+        ),
+        Node(
+            package="manus_l20_haptics",
+            executable="haptic_feedback_node",
+            name=f"manus_l20_haptic_feedback_{hand_type}",
+            output="screen",
+            condition=IfCondition(enable_haptics),
+            parameters=[
+                {
+                    "glove_id": haptic_glove_id,
+                    "force_topic": haptic_force_topic,
+                    "vib_topic": haptic_vib_topic,
+                    "normal_force_full_scale": haptic_normal_force_full_scale,
+                }
+            ],
+        ),
         ExecuteProcess(
             cmd=[
                 "ros2",
@@ -224,13 +273,21 @@ def _hand_actions(
     ]
 
 
-def generate_manus_l20_launch(*, hand_type: str, retarget_node_name: str) -> LaunchDescription:
+def generate_manus_l20_launch(
+    *,
+    hand_type: str,
+    retarget_node_name: str,
+    logic_hand_type: str | None = None,
+) -> LaunchDescription:
     if hand_type not in {"left", "right"}:
         raise ValueError(f"hand_type must be left or right, got {hand_type!r}")
+    logic_type = logic_hand_type or hand_type
+    if logic_type not in {"left", "right"}:
+        raise ValueError(f"logic_hand_type must be left or right, got {logic_type!r}")
     # The left-hand runtime intentionally reuses the verified right-hand
     # retargeting path and only switches the physical driver topic/hand ID.
     retarget_type = "right"
-    landmark_transform_default = "left_glove_to_right_retarget" if hand_type == "left" else "pico_native_to_rh"
+    landmark_transform_default = "left_glove_to_right_retarget" if logic_type == "left" else "pico_native_to_rh"
 
     return LaunchDescription(
         [
@@ -243,6 +300,17 @@ def generate_manus_l20_launch(*, hand_type: str, retarget_node_name: str) -> Lau
             DeclareLaunchArgument("driver_state_hz", default_value="10.0"),
             DeclareLaunchArgument("driver_can_sleep_ms", default_value="3.0"),
             DeclareLaunchArgument("start_manus", default_value="false"),
+            DeclareLaunchArgument("load_manus_calibration", default_value="true"),
+            DeclareLaunchArgument("left_manus_calibration_path", default_value=_manus_calibration_file("left")),
+            DeclareLaunchArgument("right_manus_calibration_path", default_value=_manus_calibration_file("right")),
+            DeclareLaunchArgument("enable_haptics", default_value="false"),
+            DeclareLaunchArgument("mock_tactile", default_value="false"),
+            DeclareLaunchArgument("haptic_glove_id", default_value="0"),
+            DeclareLaunchArgument("haptic_force_topic", default_value=f"/manus_l20_haptics/{hand_type}/force"),
+            DeclareLaunchArgument("haptic_vib_topic", default_value=""),
+            DeclareLaunchArgument("haptic_poll_rate_hz", default_value="30.0"),
+            DeclareLaunchArgument("haptic_read_mode", default_value="auto"),
+            DeclareLaunchArgument("haptic_normal_force_full_scale", default_value="100.0"),
             DeclareLaunchArgument("mapping_mode", default_value="landmark_flexion"),
             DeclareLaunchArgument("publish_rate_hz", default_value="50.0"),
             DeclareLaunchArgument("max_delta_per_cycle", default_value="255"),
@@ -254,19 +322,19 @@ def generate_manus_l20_launch(*, hand_type: str, retarget_node_name: str) -> Lau
             DeclareLaunchArgument("enable_finger_yaw_mapping", default_value="true"),
             DeclareLaunchArgument(
                 "finger_yaw_calibration_path",
-                default_value=_config_file(_finger_yaw_config_name(hand_type)),
+                default_value=_config_file(_finger_yaw_config_name(logic_type)),
             ),
             DeclareLaunchArgument("finger_yaw_source", default_value="tip"),
             DeclareLaunchArgument("finger_yaw_command_gain", default_value="-500.0"),
             DeclareLaunchArgument("finger_yaw_max_delta", default_value="120"),
             DeclareLaunchArgument(
                 "flexion_calibration_path",
-                default_value=_config_file(_flexion_config_name(hand_type)),
+                default_value=_config_file(_flexion_config_name(logic_type)),
             ),
             DeclareLaunchArgument("enable_thumb_flexion_mapping", default_value="true"),
             DeclareLaunchArgument(
                 "thumb_flexion_mapping_path",
-                default_value=_config_file(_thumb_flexion_config_name(hand_type)),
+                default_value=_config_file(_thumb_flexion_config_name(logic_type)),
             ),
             DeclareLaunchArgument("thumb_flexion_root_gamma", default_value="1.0"),
             DeclareLaunchArgument("thumb_flexion_tip_gamma", default_value="1.0"),
@@ -285,7 +353,7 @@ def generate_manus_l20_launch(*, hand_type: str, retarget_node_name: str) -> Lau
                 "thumb_segment_manus_open_vector_path",
                 default_value=_config_file(f"thumb_segment_open_vector_{retarget_type}.yaml"),
             ),
-            DeclareLaunchArgument("thumb_segment_frame_path", default_value=_thumb_segment_frame_default(hand_type)),
+            DeclareLaunchArgument("thumb_segment_frame_path", default_value=_thumb_segment_frame_default(logic_type)),
             DeclareLaunchArgument("thumb_segment_scale", default_value="1.0"),
             DeclareLaunchArgument("thumb_segment_damping", default_value="0.0008"),
             DeclareLaunchArgument("thumb_segment_max_step", default_value="0.20"),
@@ -309,7 +377,7 @@ def generate_manus_l20_launch(*, hand_type: str, retarget_node_name: str) -> Lau
             ),
             DeclareLaunchArgument(
                 "thumb_segment_yaw_progress_gate_start",
-                default_value="0.25" if hand_type == "left" else "0.0",
+                default_value="0.25" if logic_type == "left" else "0.0",
             ),
             DeclareLaunchArgument("thumb_segment_yaw_progress_gate_end", default_value="1.0"),
             DeclareLaunchArgument("thumb_yaw_command_gain", default_value="-180.0"),
@@ -389,11 +457,28 @@ def generate_manus_l20_launch(*, hand_type: str, retarget_node_name: str) -> Lau
                 l20_thumb_ik_root=LaunchConfiguration("l20_thumb_ik_root"),
                 l20_thumb_ik_config_path=LaunchConfiguration("l20_thumb_ik_config_path"),
                 linkerhand_sdk_root=LaunchConfiguration("linkerhand_sdk_root"),
+                enable_haptics=LaunchConfiguration("enable_haptics"),
+                mock_tactile=LaunchConfiguration("mock_tactile"),
+                haptic_glove_id=LaunchConfiguration("haptic_glove_id"),
+                haptic_force_topic=LaunchConfiguration("haptic_force_topic"),
+                haptic_vib_topic=LaunchConfiguration("haptic_vib_topic"),
+                haptic_poll_rate_hz=LaunchConfiguration("haptic_poll_rate_hz"),
+                haptic_read_mode=LaunchConfiguration("haptic_read_mode"),
+                haptic_normal_force_full_scale=LaunchConfiguration("haptic_normal_force_full_scale"),
             ),
-            ExecuteProcess(
+            Node(
                 condition=IfCondition(LaunchConfiguration("start_manus")),
-                cmd=["ros2", "run", "manus_ros2", "manus_data_publisher"],
+                package="manus_ros2",
+                executable="manus_data_publisher",
+                name="manus_data_publisher",
                 output="screen",
+                parameters=[
+                    {
+                        "load_calibration": ParameterValue(LaunchConfiguration("load_manus_calibration"), value_type=bool),
+                        "left_calibration_path": LaunchConfiguration("left_manus_calibration_path"),
+                        "right_calibration_path": LaunchConfiguration("right_manus_calibration_path"),
+                    }
+                ],
             ),
         ]
     )
@@ -411,6 +496,20 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         DeclareLaunchArgument("driver_state_hz", default_value="10.0"),
         DeclareLaunchArgument("driver_can_sleep_ms", default_value="3.0"),
         DeclareLaunchArgument("start_manus", default_value="false"),
+        DeclareLaunchArgument("load_manus_calibration", default_value="true"),
+        DeclareLaunchArgument("left_manus_calibration_path", default_value=_manus_calibration_file("left")),
+        DeclareLaunchArgument("right_manus_calibration_path", default_value=_manus_calibration_file("right")),
+        DeclareLaunchArgument("enable_haptics", default_value="false"),
+        DeclareLaunchArgument("mock_tactile", default_value="false"),
+        DeclareLaunchArgument("right_haptic_glove_id", default_value="0"),
+        DeclareLaunchArgument("left_haptic_glove_id", default_value="1"),
+        DeclareLaunchArgument("right_haptic_force_topic", default_value="/manus_l20_haptics/right/force"),
+        DeclareLaunchArgument("left_haptic_force_topic", default_value="/manus_l20_haptics/left/force"),
+        DeclareLaunchArgument("right_haptic_vib_topic", default_value=""),
+        DeclareLaunchArgument("left_haptic_vib_topic", default_value=""),
+        DeclareLaunchArgument("haptic_poll_rate_hz", default_value="30.0"),
+        DeclareLaunchArgument("haptic_read_mode", default_value="auto"),
+        DeclareLaunchArgument("haptic_normal_force_full_scale", default_value="100.0"),
         DeclareLaunchArgument("mapping_mode", default_value="landmark_flexion"),
         DeclareLaunchArgument("publish_rate_hz", default_value="50.0"),
         DeclareLaunchArgument("max_delta_per_cycle", default_value="255"),
@@ -480,6 +579,9 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         roll_gate_end_name: str,
         yaw_gate_start_name: str,
         yaw_gate_end_name: str,
+        haptic_glove_id_name: str,
+        haptic_force_topic_name: str,
+        haptic_vib_topic_name: str,
     ):
         retarget_type = "right"
         return _hand_actions(
@@ -548,6 +650,14 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
                 _THUMB_IK_ROOT / "configs" / "retargeting" / retarget_type / f"linkerhand_l20_{retarget_type}.yaml"
             ),
             linkerhand_sdk_root=LaunchConfiguration("linkerhand_sdk_root"),
+            enable_haptics=LaunchConfiguration("enable_haptics"),
+            mock_tactile=LaunchConfiguration("mock_tactile"),
+            haptic_glove_id=LaunchConfiguration(haptic_glove_id_name),
+            haptic_force_topic=LaunchConfiguration(haptic_force_topic_name),
+            haptic_vib_topic=LaunchConfiguration(haptic_vib_topic_name),
+            haptic_poll_rate_hz=LaunchConfiguration("haptic_poll_rate_hz"),
+            haptic_read_mode=LaunchConfiguration("haptic_read_mode"),
+            haptic_normal_force_full_scale=LaunchConfiguration("haptic_normal_force_full_scale"),
         )
 
     return LaunchDescription(
@@ -562,6 +672,9 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
                 "right_thumb_segment_roll_progress_gate_end",
                 "right_thumb_segment_yaw_progress_gate_start",
                 "right_thumb_segment_yaw_progress_gate_end",
+                "right_haptic_glove_id",
+                "right_haptic_force_topic",
+                "right_haptic_vib_topic",
             ),
             *hand_actions(
                 "left",
@@ -572,11 +685,23 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
                 "left_thumb_segment_roll_progress_gate_end",
                 "left_thumb_segment_yaw_progress_gate_start",
                 "left_thumb_segment_yaw_progress_gate_end",
+                "left_haptic_glove_id",
+                "left_haptic_force_topic",
+                "left_haptic_vib_topic",
             ),
-            ExecuteProcess(
+            Node(
                 condition=IfCondition(LaunchConfiguration("start_manus")),
-                cmd=["ros2", "run", "manus_ros2", "manus_data_publisher"],
+                package="manus_ros2",
+                executable="manus_data_publisher",
+                name="manus_data_publisher",
                 output="screen",
+                parameters=[
+                    {
+                        "load_calibration": ParameterValue(LaunchConfiguration("load_manus_calibration"), value_type=bool),
+                        "left_calibration_path": LaunchConfiguration("left_manus_calibration_path"),
+                        "right_calibration_path": LaunchConfiguration("right_manus_calibration_path"),
+                    }
+                ],
             ),
         ]
     )

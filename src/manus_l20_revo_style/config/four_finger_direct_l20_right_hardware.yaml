@@ -1,0 +1,41 @@
+# Hardware-safe four-finger direct mapping.
+# Same 255-0 mapping as four_finger_direct_l20_right.yaml, with slower command
+# filtering for first real-hand tests.
+
+input:
+  side: right
+
+l20_command:
+  direct_ergonomics_mapping: true
+  ergonomics_ranges:
+    index:
+      root_key: IndexMCPStretch
+      root_range: [0.0, 85.0]
+      tip_key: IndexPIPStretch
+      tip_range: [0.0, 75.0]
+    middle:
+      root_key: MiddleMCPStretch
+      root_range: [0.0, 80.0]
+      tip_key: MiddlePIPStretch
+      tip_range: [0.0, 90.0]
+    ring:
+      root_key: RingMCPStretch
+      root_range: [0.0, 75.0]
+      tip_key: RingPIPStretch
+      tip_range: [0.0, 90.0]
+    pinky:
+      root_key: PinkyMCPStretch
+      root_range: [0.0, 60.0]
+      tip_key: PinkyPIPStretch
+      tip_range: [0.0, 80.0]
+
+  neutral_command: [255, 255, 255, 255, 255, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 255, 255, 255, 255]
+  open_command: [255, 255, 255, 255, 255, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 255, 255, 255, 255]
+  closed_command: [255, 0, 0, 0, 0, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 0, 0, 0, 0]
+  min_command: [255, 0, 0, 0, 0, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 0, 0, 0, 0]
+  max_command: [255, 255, 255, 255, 255, 128, 163, 129, 86, 62, 180, 255, 255, 255, 255, 255, 255, 255, 255, 255]
+
+smoothing:
+  lowpass_alpha: 0.30
+  max_delta_per_cycle: 4
+  interpolation_hz: 60.0

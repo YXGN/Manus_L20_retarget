@@ -18,6 +18,34 @@ Bimanual launch:
 ros2 launch bringup manus_l20_linkerhand_g20.launch.py start_manus:=true
 ```
 
+MANUS glove `.mcal` calibration is loaded automatically by `manus_data_publisher`
+when `start_manus:=true`. The default paths are:
+
+```text
+src/manus_ros2/calibration/Calibration_left.mcal
+src/manus_ros2/calibration/Calibration_right.mcal
+```
+
+To create or refresh these files, build and run the Sharpa calibration GUI:
+
+```bash
+cd src/sharpa-manus-sdk-main/client/CalibrationGUI
+./build.sh
+./CalibrationGUI.out
+```
+
+After completing left/right calibration, copy or point the launch arguments at
+the generated files:
+
+```bash
+ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
+  start_manus:=true \
+  left_manus_calibration_path:=/path/to/Calibration_left.mcal \
+  right_manus_calibration_path:=/path/to/Calibration_right.mcal
+```
+
+Use `load_manus_calibration:=false` to run without applying `.mcal` files.
+
 Bimanual defaults:
 
 ```text
@@ -35,6 +63,23 @@ Single-hand chain:
   -> /cb_right_hand_control_cmd
   -> linker_hand_advanced_g20
   -> LinkerHand L20
+```
+
+Optional L20 haptic feedback:
+
+```bash
+ros2 launch bringup manus_l20_linkerhand_l20_left.launch.py \
+  start_manus:=true enable_haptics:=true haptic_glove_id:=0
+```
+
+For a no-hardware vibration-path smoke test, add `mock_tactile:=true`. The
+haptic chain publishes:
+
+```text
+LinkerHand L20 tactile CAN
+  -> /manus_l20_haptics/left/force
+  -> /manus_glove_0/vibration_cmd
+  -> MANUS glove vibration motors
 ```
 
 The right-hand launch publishes to `/cb_right_hand_control_cmd`, sets
