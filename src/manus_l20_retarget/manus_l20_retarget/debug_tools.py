@@ -7,6 +7,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
+
 STANDARD_OPEN_COMMAND = [
     255,
     255,
@@ -69,19 +70,8 @@ class G20JointProbe(Node):
         self._pub.publish(msg)
 
 
-def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Probe one G20/L20 command slot on real hardware.")
-    parser.add_argument("--topic", default="/cb_right_hand_control_cmd")
-    parser.add_argument("--slot", type=int, required=True, choices=range(20))
-    parser.add_argument("--values", type=int, nargs="+", required=True)
-    parser.add_argument("--hold", type=float, default=1.5)
-    parser.add_argument("--return-open", action="store_true", default=True)
-    return parser.parse_args()
-
-
-def main(args: list[str] | None = None) -> None:
-    parsed = _parse_args()
-    rclpy.init(args=args)
+def run_g20_probe(parsed: argparse.Namespace) -> None:
+    rclpy.init()
     node = G20JointProbe(parsed.topic)
     try:
         base = list(STANDARD_OPEN_COMMAND)
@@ -94,7 +84,8 @@ def main(args: list[str] | None = None) -> None:
             command = list(STANDARD_OPEN_COMMAND)
             command[parsed.slot] = max(0, min(255, int(value)))
             node.get_logger().info(
-                f"probing slot {parsed.slot} ({SLOT_LABELS[parsed.slot]}) with value {command[parsed.slot]}: {command}"
+                f"probing slot {parsed.slot} ({SLOT_LABELS[parsed.slot]}) "
+                f"with value {command[parsed.slot]}: {command}"
             )
             node.publish_command(command)
             rclpy.spin_once(node, timeout_sec=0.1)
@@ -109,6 +100,26 @@ def main(args: list[str] | None = None) -> None:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="MANUS L20 debugging utilities.")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    g20_probe = subparsers.add_parser("g20-probe", description="Probe one G20/L20 command slot on real hardware.")
+    g20_probe.add_argument("--topic", default="/cb_right_hand_control_cmd")
+    g20_probe.add_argument("--slot", type=int, required=True, choices=range(20))
+    g20_probe.add_argument("--values", type=int, nargs="+", required=True)
+    g20_probe.add_argument("--hold", type=float, default=1.5)
+    g20_probe.add_argument("--return-open", action="store_true", default=True)
+    g20_probe.set_defaults(func=run_g20_probe)
+    return parser
+
+
+def main(args: list[str] | None = None) -> None:
+    parser = _build_parser()
+    parsed = parser.parse_args(args)
+    parsed.func(parsed)
 
 
 if __name__ == "__main__":

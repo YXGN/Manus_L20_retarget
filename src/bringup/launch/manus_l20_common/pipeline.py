@@ -137,6 +137,7 @@ def _hand_actions(
     haptic_poll_rate_hz,
     haptic_read_mode,
     haptic_normal_force_full_scale,
+    flexion_open_straightness_threshold,
 ):
     if hand_type not in {"left", "right"}:
         raise ValueError(f"hand_type must be left or right, got {hand_type!r}")
@@ -207,6 +208,7 @@ def _hand_actions(
                     "thumb_roll_command_gain": thumb_roll_command_gain,
                     "thumb_yaw_max_delta": thumb_yaw_max_delta,
                     "thumb_roll_max_delta": thumb_roll_max_delta,
+                    "flexion_open_straightness_threshold": flexion_open_straightness_threshold,
                 }
             ],
         ),
@@ -318,6 +320,7 @@ def generate_manus_l20_launch(
             DeclareLaunchArgument("landmark_transform", default_value=landmark_transform_default),
             DeclareLaunchArgument("wrist_mode", default_value="estimate"),
             DeclareLaunchArgument("distal_mode", default_value="dip"),
+            DeclareLaunchArgument("flexion_open_straightness_threshold", default_value="0.985"),
             DeclareLaunchArgument("enable_finger_yaw", default_value="true"),
             DeclareLaunchArgument("enable_finger_yaw_mapping", default_value="true"),
             DeclareLaunchArgument(
@@ -465,6 +468,7 @@ def generate_manus_l20_launch(
                 haptic_poll_rate_hz=LaunchConfiguration("haptic_poll_rate_hz"),
                 haptic_read_mode=LaunchConfiguration("haptic_read_mode"),
                 haptic_normal_force_full_scale=LaunchConfiguration("haptic_normal_force_full_scale"),
+                flexion_open_straightness_threshold=LaunchConfiguration("flexion_open_straightness_threshold"),
             ),
             Node(
                 condition=IfCondition(LaunchConfiguration("start_manus")),
@@ -518,6 +522,7 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         DeclareLaunchArgument("left_landmark_transform", default_value="left_glove_to_right_retarget"),
         DeclareLaunchArgument("wrist_mode", default_value="estimate"),
         DeclareLaunchArgument("distal_mode", default_value="dip"),
+        DeclareLaunchArgument("flexion_open_straightness_threshold", default_value="0.985"),
         DeclareLaunchArgument("enable_finger_yaw", default_value="true"),
         DeclareLaunchArgument("enable_finger_yaw_mapping", default_value="true"),
         DeclareLaunchArgument("finger_yaw_source", default_value="tip"),
@@ -658,6 +663,7 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
             haptic_poll_rate_hz=LaunchConfiguration("haptic_poll_rate_hz"),
             haptic_read_mode=LaunchConfiguration("haptic_read_mode"),
             haptic_normal_force_full_scale=LaunchConfiguration("haptic_normal_force_full_scale"),
+            flexion_open_straightness_threshold=LaunchConfiguration("flexion_open_straightness_threshold"),
         )
 
     return LaunchDescription(

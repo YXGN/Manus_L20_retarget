@@ -11,9 +11,12 @@ Manus_L20_retarget/
     manus_ros2_msgs/          # MANUS ROS2 messages
     manus_ros2/               # C++ MANUS publisher
     manus_l20_retarget/       # MANUS -> L20 command retarget
+    manus_l20_haptics/        # optional L20 tactile -> MANUS vibration feedback
+    manus_l20_revo_style/     # experimental Revo-style MANUS -> L20 path
     linker_hand_ros2_sdk/     # LinkerHand G20 executable used for L20 hardware
     bringup/                  # main launch
     l20_thumb_ik/             # L20 MuJoCo model + thumb segment IK dependency
+    sharpa-manus-sdk-main/    # vendor reference package and MANUS calibration GUI
   rosbag/                     # bag output directory
   build/ install/ log/        # colcon generated
 ```
@@ -88,10 +91,8 @@ export MANUS_L20_ROOT=<Manus_L20_retarget>
 ## Diagnostics / simulation helpers
 
 ```bash
-ros2 run manus_l20_retarget mock_manus_publisher
-ros2 run manus_l20_retarget g20_joint_probe
-ros2 run manus_l20_retarget inspect_manus_landmarks
-ros2 run manus_l20_retarget visualize_thumb_ik
+ros2 run manus_l20_retarget debug_tools g20-probe --slot 1 --values 255 128 0
+ros2 run manus_l20_retarget l20_simulation --topic /manus_glove_0
 ```
 
 ## Bag directory

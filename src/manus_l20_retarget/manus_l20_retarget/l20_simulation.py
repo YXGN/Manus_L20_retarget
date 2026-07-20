@@ -12,7 +12,6 @@ import rclpy
 import yaml
 from manus_ros2_msgs.msg import ManusGlove
 from rclpy.node import Node
-from sensor_msgs.msg import JointState
 
 from .manus_landmarks import (
     _finger_joint_orientation_yaw_rad,
@@ -58,12 +57,11 @@ RED = np.asarray([1.0, 0.15, 0.1, 1.0], dtype=np.float32)
 YELLOW = np.asarray([1.0, 0.8, 0.1, 1.0], dtype=np.float32)
 
 
-class ThumbIKVisualizer(Node):
+class L20SimulationNode(Node):
     def __init__(self, args: argparse.Namespace) -> None:
-        super().__init__("manus_thumb_ik_visualizer")
+        super().__init__("manus_l20_simulation")
         self._args = args
         self._last_print_time = 0.0
-        self._latest_command: list[int] | None = None
 
         self._neutral_command = list(STANDARD_OPEN_COMMAND)
         self._closed_command = list(STANDARD_FIST_COMMAND)
@@ -94,17 +92,14 @@ class ThumbIKVisualizer(Node):
         self._load_l20_thumb_ik()
         self._viewer = self._launch_viewer()
         self.create_subscription(ManusGlove, args.topic, self._on_glove, 10)
-        if args.command_topic:
-            self.create_subscription(JointState, args.command_topic, self._on_command, 10)
         self.get_logger().info(
-            "thumb segment IK visualizer started: "
-            "blue=L20 segment origin, green=MANUS mapped target, "
-            "red=L20 solved segment end, yellow=residual"
+            "MANUS -> L20 MuJoCo simulation started: "
+            f"input={args.topic}, thumb_debug={args.thumb_debug}"
         )
-        if args.command_topic:
+        if args.thumb_debug:
             self.get_logger().info(
-                f"command replay enabled: command_topic={args.command_topic}, "
-                f"command_source={args.command_source}"
+                "thumb debug overlay: blue=L20 segment origin, green=MANUS mapped target, "
+                "red=L20 solved segment end, yellow=residual"
             )
 
     def _load_flexion_calibration(self, path_value: str) -> None:
@@ -424,7 +419,7 @@ class ThumbIKVisualizer(Node):
         viewer = ManagedPassiveViewer(
             self._engine.hand_model.model,
             self._engine.hand_model.data,
-            window_title="L20 Thumb Segment IK Debug",
+            window_title="MANUS L20 MuJoCo Simulation",
             show_left_ui=False,
             show_right_ui=False,
         )
@@ -438,7 +433,7 @@ class ThumbIKVisualizer(Node):
             )
         set_viewer_overlay_label(
             viewer,
-            "blue origin | green MANUS 2->3 target | red L20 segment end | yellow residual",
+            "MANUS -> L20 simulation | use --thumb-debug for segment IK overlay",
         )
         viewer.sync(state_only=True)
         return viewer
@@ -477,7 +472,7 @@ class ThumbIKVisualizer(Node):
             self._thumb_segment_robot_open_command[10],
             self._args.yaw_command_scale,
         )
-        final_command = self._select_final_command(command)
+        final_command = command
         final_qpos = self._adapter.sdk_range_to_qpos(final_command)
 
         model = self._engine.hand_model.model
@@ -489,7 +484,10 @@ class ThumbIKVisualizer(Node):
             target = origin + target_vector
             actual = data.xpos[self._thumb_segment_ik.segment_body_id].copy()
             residual = float(np.linalg.norm(actual - target))
-            self._draw_overlay(self._viewer.user_scn, origin, target, actual)
+            if self._args.thumb_debug:
+                self._draw_overlay(self._viewer.user_scn, origin, target, actual)
+            else:
+                self._viewer.user_scn.ngeom = 0
         self._viewer.sync()
 
         now = time.monotonic()
@@ -509,30 +507,8 @@ class ThumbIKVisualizer(Node):
                 f"raw_roll_yaw={[raw_command[index] for index in THUMB_IK_COMMAND_SLOTS]} "
                 f"computed_thumb={[command[index] for index in THUMB_COMMAND_SLOTS]} "
                 f"shown_thumb={[final_command[index] for index in THUMB_COMMAND_SLOTS]} "
-                f"source={self._final_command_source()} "
                 f"base_thumb={[base_command[index] for index in THUMB_COMMAND_SLOTS]}"
             )
-
-    def _on_command(self, msg: JointState) -> None:
-        values = [clamp_u8(value) for value in msg.position[:20]]
-        if len(values) == 20:
-            self._latest_command = values
-
-    def _select_final_command(self, computed_command: list[int]) -> list[int]:
-        if self._args.command_source == "computed":
-            return list(computed_command)
-        if self._args.command_source == "topic":
-            return list(self._latest_command) if self._latest_command is not None else list(computed_command)
-        if self._latest_command is not None:
-            return list(self._latest_command)
-        return list(computed_command)
-
-    def _final_command_source(self) -> str:
-        if self._args.command_source == "computed":
-            return "computed"
-        if self._args.command_source == "topic":
-            return "topic" if self._latest_command is not None else "computed_waiting_topic"
-        return "topic" if self._latest_command is not None else "computed_auto"
 
     def _base_command(self, landmarks: np.ndarray, raw_nodes: list[Any] | None = None) -> list[int]:
         command = list(self._neutral_command)
@@ -755,10 +731,8 @@ def _parse_args() -> argparse.Namespace:
     root = _default_workspace_root()
     thumb_ik_root = root / "src" / "l20_thumb_ik"
     retarget_config = root / "src" / "manus_l20_retarget" / "config"
-    parser = argparse.ArgumentParser(description="Visualize current MANUS thumb segment IK in MuJoCo.")
+    parser = argparse.ArgumentParser(description="Run MANUS -> L20 MuJoCo simulation without real hardware.")
     parser.add_argument("--topic", default="/manus_glove_0")
-    parser.add_argument("--command-topic", default="")
-    parser.add_argument("--command-source", choices=("auto", "computed", "topic"), default="auto")
     parser.add_argument("--interval", type=float, default=0.5)
     parser.add_argument("--mode", choices=("segment",), default="segment", help=argparse.SUPPRESS)
     parser.add_argument("--transform", default="pico_native_to_rh")
@@ -773,7 +747,8 @@ def _parse_args() -> argparse.Namespace:
         "--linkerhand-sdk-root",
         default=str(thumb_ik_root / "third_party" / "linkerhand-python-sdk"),
     )
-    parser.add_argument("--show-fingers", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--show-fingers", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--thumb-debug", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--flexion-calibration-path", default="")
     parser.add_argument("--finger-yaw", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--finger-yaw-calibration-path", default="")
@@ -812,7 +787,7 @@ def _parse_args() -> argparse.Namespace:
 def main(args: list[str] | None = None) -> None:
     parsed = _parse_args()
     rclpy.init(args=args)
-    node = ThumbIKVisualizer(parsed)
+    node = L20SimulationNode(parsed)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

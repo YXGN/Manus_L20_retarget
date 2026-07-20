@@ -25,17 +25,10 @@ setup(
     license="Proprietary",
     entry_points={
         "console_scripts": [
-            "mock_manus_publisher = manus_l20_retarget.mock_manus_publisher:main",
             "manus_l20_retarget_node = manus_l20_retarget.manus_l20_retarget_node:main",
-            "capture_flexion_calibration = manus_l20_retarget.capture_flexion_calibration:main",
-            "capture_finger_yaw_calibration = manus_l20_retarget.capture_finger_yaw_calibration:main",
-            "capture_thumb_flexion_mapping = manus_l20_retarget.capture_thumb_flexion_mapping:main",
-            "capture_thumb_segment_frame = manus_l20_retarget.capture_thumb_segment_frame:main",
-            "capture_thumb_segment_open_vector = manus_l20_retarget.capture_thumb_segment_open_vector:main",
-            "g20_joint_probe = manus_l20_retarget.g20_joint_probe:main",
-            "inspect_manus_finger_points = manus_l20_retarget.inspect_manus_finger_points:main",
-            "inspect_manus_landmarks = manus_l20_retarget.inspect_manus_landmarks:main",
-            "visualize_thumb_ik = manus_l20_retarget.visualize_thumb_ik:main",
+            "calibration_capture = manus_l20_retarget.calibration_capture:main",
+            "debug_tools = manus_l20_retarget.debug_tools:main",
+            "l20_simulation = manus_l20_retarget.l20_simulation:main",
         ],
     },
 )
