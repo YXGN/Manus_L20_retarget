@@ -13,10 +13,11 @@ src/l20_thumb_ik
 src/l20_thumb_ik/src/l20_ik_core
 ```
 
-主 ROS 节点被整理为：
+主 ROS 节点和主链路辅助模块被整理为：
 
 ```text
 src/manus_l20_retarget/manus_l20_retarget/manus_l20_retarget_node.py
+src/manus_l20_retarget/manus_l20_retarget/retarget_pipeline.py
 ```
 
 ## 顶层目录
@@ -26,6 +27,9 @@ src/manus_l20_retarget/manus_l20_retarget/manus_l20_retarget_node.py
 | `.gitignore` | 排除 `build/`、`install/`、`log/`、Python 缓存、IDE 配置和 rosbag。 |
 | `README.md` | 项目的快速构建和运行说明。 |
 | `CODE_STRUCTURE.md` | 当前文件，说明代码组织和每个主要代码文件职责。 |
+| `MANUS_L20_TELEOP_SOP.md` | 面向操作者的手套标定、硬件检查和遥操作启动流程。 |
+| `CODE_WALKTHROUGH_CN.md` | 中文代码阅读导航，按 ROS 消息、launch、主节点等顺序带读。 |
+| `WORKING_PRINCIPLE_CN.md` | 中文算法工作原理说明，重点讲 MANUS 数据如何变成 L20 20 槽命令。 |
 | `license/license.txt` | 项目保留的许可证文本。 |
 | `src/` | ROS2 包和本项目依赖库源码。 |
 | `build/`、`install/`、`log/` | colcon 生成目录，不应该提交到 Git。 |
@@ -85,7 +89,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | 文件 | 作用 |
 | --- | --- |
 | `package.xml` | `manus_l20_retarget` 包声明。 |
-| `setup.py` | Python 包安装脚本，注册 `manus_l20_retarget_node`、调试工具和可视化工具，并安装 `config/*.yaml`。 |
+| `setup.py` | Python 包安装脚本，注册 `manus_l20_retarget_node`、标定采集、调试工具和仿真工具，并安装 `config/*.yaml`。 |
 | `setup.cfg` | ament Python 安装路径配置。 |
 | `resource/manus_l20_retarget` | ament 资源索引标记。 |
 | `config/flexion_right_calibration.yaml` | 右手四指弯曲映射标定。 |
@@ -94,6 +98,8 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | `config/finger_yaw_left_calibration.yaml` | 左手四指 yaw 映射标定。 |
 | `config/thumb_right_flexion_mapping.yaml` | 右手拇指 root/tip 弯曲映射。 |
 | `config/thumb_left_flexion_mapping.yaml` | 左手拇指 root/tip 弯曲映射。 |
+| `config/thumb_segment_frame_right.yaml` | 右手拇指 segment IK 的 open/touch 双姿态对齐 frame。 |
+| `config/thumb_segment_frame_left.yaml` | 左手拇指 segment IK 的 open/touch 双姿态对齐 frame。 |
 | `config/thumb_segment_open_vector_right.yaml` | 右手拇指 segment IK 的固定 MANUS 张开基准向量。 |
 
 ### Python 源码
@@ -103,11 +109,11 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | `manus_l20_retarget/__init__.py` | Python 包标记。 |
 | `manus_l20_retarget/mapping.py` | 基础数值工具，目前主要提供 L20 命令范围裁剪等小函数。 |
 | `manus_l20_retarget/manus_landmarks.py` | MANUS raw node 到手部 landmark 的转换层；同时提取四指弯曲、四指 yaw、拇指 segment 等算法输入特征。 |
+| `manus_l20_retarget/retarget_pipeline.py` | 主链路纯函数和轻量类集合，包含 MANUS feature 提取、四指 target、L20 command adapter 和 safety filter。 |
 | `manus_l20_retarget/manus_l20_retarget_node.py` | 主运行节点。订阅 MANUS 手套消息，组合四指弯曲映射、四指 yaw 映射、拇指弯曲映射、拇指 roll/yaw segment IK，最后发布 L20 20 槽命令。 |
-| `manus_l20_retarget/visualize_thumb_ik.py` | 拇指 segment IK 的 MuJoCo 可视化工具，用于查看 MANUS 目标段、L20 实际段和 IK 解。 |
-| `manus_l20_retarget/mock_manus_publisher.py` | 模拟 MANUS 手套消息发布器，用于不接手套时检查 ROS topic 和重定向流程。 |
-| `manus_l20_retarget/g20_joint_probe.py` | L20/G20 命令槽位探测工具，用来单独发送或检查某些电机槽位。 |
-| `manus_l20_retarget/inspect_manus_landmarks.py` | MANUS landmark 调试工具，用来打印转换后的手部点位和特征值。 |
+| `manus_l20_retarget/calibration_capture.py` | 标定采集入口集合，包含四指 flexion、四指 yaw、拇指 flexion、拇指 open vector 和拇指 segment frame 采集子命令。 |
+| `manus_l20_retarget/l20_simulation.py` | MANUS 到 L20 的整手 MuJoCo 仿真入口，可选 `--thumb-debug` 查看拇指 segment IK 目标和残差。 |
+| `manus_l20_retarget/debug_tools.py` | L20/G20 调试工具集合，目前保留 `g20-probe` 槽位探测子命令。 |
 
 当前稳定控制策略：
 
@@ -120,7 +126,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 
 ## `src/l20_thumb_ik`
 
-这是本项目内部化后的 L20 拇指 IK 支撑库，主要给 `manus_l20_retarget_node.py` 和 `visualize_thumb_ik.py` 提供 MuJoCo 模型、配置加载、IK 求解和命令转换能力。
+这是本项目内部化后的 L20 拇指 IK 支撑库，主要给 `manus_l20_retarget_node.py` 和 `l20_simulation.py` 提供 MuJoCo 模型、配置加载、IK 求解和命令转换能力。
 
 | 文件或目录 | 作用 |
 | --- | --- |
@@ -329,7 +335,8 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 
 | 文件 | 为什么重要 |
 | --- | --- |
-| `src/manus_l20_retarget/manus_l20_retarget/manus_l20_retarget_node.py` | 所有 MANUS 到 L20 的在线控制逻辑集中在这里。 |
+| `src/manus_l20_retarget/manus_l20_retarget/manus_l20_retarget_node.py` | 在线 ROS 节点编排、参数、标定加载、yaw/拇指 IK 和发布逻辑在这里。 |
+| `src/manus_l20_retarget/manus_l20_retarget/retarget_pipeline.py` | MANUS feature 提取、四指 flexion target、L20 command adapter 和最终 command filter 在这里。 |
 | `src/manus_l20_retarget/manus_l20_retarget/manus_landmarks.py` | MANUS 点位、姿态和特征提取在这里。 |
 | `src/bringup/launch/manus_l20_common/pipeline.py` | 启动参数和左右手默认配置在这里。 |
 | `src/manus_l20_retarget/config/*.yaml` | 当前真机效果依赖的标定文件。 |

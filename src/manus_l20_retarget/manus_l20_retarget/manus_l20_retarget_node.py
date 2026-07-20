@@ -24,7 +24,20 @@ from .manus_landmarks import (
     _finger_yaw_rad,
     _palm_frame,
     _thumb_pose_features,
-    manus_raw_nodes_to_mediapipe_landmarks,
+)
+from .retarget_pipeline import (
+    FINGER_LANDMARKS,
+    L20_SLOT_NAMES,
+    HandFeatures,
+    L20CommandAdapter,
+    compute_landmark_flexion_targets,
+    extract_hand_features,
+    filter_l20_command,
+    _joint_flexion_rad,
+    _lerp_command,
+    _normalized_angle,
+    _open_straightness_guard,
+    _scale_command_delta,
 )
 
 
@@ -98,13 +111,6 @@ THUMB_IK_COMMAND_SLOTS = (5, 10)
 THUMB_OUTPUT_ALPHA = 0.55
 THUMB_OUTPUT_DEADBAND = 1
 THUMB_OUTPUT_MAX_DELTA = 28
-FINGER_LANDMARKS = (
-    (1, 2, 3, 4),
-    (5, 6, 7, 8),
-    (9, 10, 11, 12),
-    (13, 14, 15, 16),
-    (17, 18, 19, 20),
-)
 
 
 class ManusL20RetargetNode(Node):
@@ -188,6 +194,7 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("landmark_transform", "pico_native_to_rh")
         self.declare_parameter("wrist_mode", "estimate")
         self.declare_parameter("distal_mode", "dip")
+        self.declare_parameter("flexion_open_straightness_threshold", 0.985)
 
         self._lock = threading.Lock()
         self._latest_msg: ManusGlove | None = None
@@ -358,6 +365,10 @@ class ManusL20RetargetNode(Node):
         self._finger_yaw_command_gain = float(self.get_parameter("finger_yaw_command_gain").value)
         self._finger_yaw_max_delta = max(0, int(self.get_parameter("finger_yaw_max_delta").value))
         self._apply_finger_yaw_calibration_path(str(self.get_parameter("finger_yaw_calibration_path").value))
+        self._flexion_open_straightness_threshold = max(
+            0.0,
+            min(1.0, float(self.get_parameter("flexion_open_straightness_threshold").value)),
+        )
         self._thumb_yaw_open_rad = float(self.get_parameter("thumb_yaw_open_rad").value)
         self._thumb_roll_open_rad = float(self.get_parameter("thumb_roll_open_rad").value)
         self._thumb_yaw_command_gain = float(self.get_parameter("thumb_yaw_command_gain").value)
@@ -368,6 +379,12 @@ class ManusL20RetargetNode(Node):
         self._tip_gamma = max(0.05, float(self.get_parameter("tip_gamma").value))
         if bool(self.get_parameter("start_from_open").value):
             self._last_command = list(self._neutral_command)
+        self._l20_command_adapter = L20CommandAdapter(
+            neutral_command=self._neutral_command,
+            closed_command=self._closed_command,
+            reserved_command=self._reserved_command,
+            lock_neutral_slots=self._lock_neutral_slots,
+        )
 
         self._hand_frame_cls = None
         self._engine = None
@@ -817,20 +834,17 @@ class ManusL20RetargetNode(Node):
         return self._thumb_segment_ik.current_segment_vector()
 
     def _command_from_manus(self, msg: ManusGlove) -> list[int]:
-        landmarks = manus_raw_nodes_to_mediapipe_landmarks(
-            msg.raw_nodes,
-            transform=str(self.get_parameter("landmark_transform").value),
+        features = extract_hand_features(
+            msg,
+            landmark_transform=str(self.get_parameter("landmark_transform").value),
             wrist_mode=str(self.get_parameter("wrist_mode").value),
             distal_mode=str(self.get_parameter("distal_mode").value),
+            hand_side_override=self._hand_side_override,
         )
-        if self._hand_side_override == "auto":
-            hand_side = "right" if str(msg.side).lower() != "left" else "left"
-        else:
-            hand_side = self._hand_side_override
         if self._mapping_mode != "l20_ik":
-            return self._command_from_landmark_flexion(landmarks, hand_side, msg.raw_nodes)
-        command = self._l20_ik_command(landmarks, hand_side)
-        self._apply_neutral_locks(command)
+            return self._command_from_landmark_flexion(features)
+        command = self._l20_ik_command(features.landmarks, features.hand_side)
+        self._l20_command_adapter.apply_neutral_locks(command)
         return command
 
     def _l20_ik_command(self, landmarks: np.ndarray, hand_side: str) -> list[int]:
@@ -851,49 +865,30 @@ class ManusL20RetargetNode(Node):
 
     def _command_from_landmark_flexion(
         self,
-        landmarks: np.ndarray,
-        hand_side: str,
-        raw_nodes: list[Any] | None = None,
+        features: HandFeatures,
     ) -> list[int]:
-        command = list(self._neutral_command)
-        for finger_index, (mcp, pip, dip, tip) in enumerate(FINGER_LANDMARKS):
-            if finger_index == 0:
-                continue
-            root_angle = _joint_flexion_rad(landmarks[mcp], landmarks[pip], landmarks[dip])
-            tip_angle = _joint_flexion_rad(landmarks[pip], landmarks[dip], landmarks[tip])
-            root_amount = _normalized_angle(
-                root_angle,
-                self._root_open_rad[finger_index],
-                self._root_closed_rad[finger_index],
-                self._root_gamma,
-            )
-            tip_amount = _normalized_angle(
-                tip_angle,
-                self._tip_open_rad[finger_index],
-                self._tip_closed_rad[finger_index],
-                self._tip_gamma,
-            )
-            command[finger_index] = _lerp_command(
-                self._neutral_command[finger_index],
-                self._closed_command[finger_index],
-                root_amount,
-            )
-            command[15 + finger_index] = _lerp_command(
-                self._neutral_command[15 + finger_index],
-                self._closed_command[15 + finger_index],
-                tip_amount,
-            )
+        landmarks = features.landmarks
+        targets = compute_landmark_flexion_targets(
+            landmarks,
+            root_open_rad=self._root_open_rad,
+            root_closed_rad=self._root_closed_rad,
+            tip_open_rad=self._tip_open_rad,
+            tip_closed_rad=self._tip_closed_rad,
+            root_gamma=self._root_gamma,
+            tip_gamma=self._tip_gamma,
+            open_straightness_threshold=self._flexion_open_straightness_threshold,
+        )
+        command = self._l20_command_adapter.command_from_targets(targets)
         if self._enable_finger_yaw:
-            self._apply_finger_yaw(command, landmarks, raw_nodes)
+            self._apply_finger_yaw(command, landmarks, features.raw_nodes)
         if self._enable_thumb_flexion_mapping:
             self._apply_thumb_flexion_mapping(command, landmarks)
         if self._enable_thumb_yaw or self._enable_thumb_roll:
             self._apply_thumb_pose(command, landmarks)
         if self._enable_thumb_ik:
-            self._apply_thumb_ik(command, landmarks, hand_side)
-        for index in range(11, 15):
-            command[index] = self._reserved_command
-        self._apply_neutral_locks(command)
+            self._apply_thumb_ik(command, landmarks, features.hand_side)
+        self._l20_command_adapter.apply_reserved_slots(command)
+        self._l20_command_adapter.apply_neutral_locks(command)
         return command
 
     def _apply_finger_yaw(
@@ -989,6 +984,22 @@ class ManusL20RetargetNode(Node):
             mapping["tip_open_rad"],
             mapping["tip_touch_rad"],
             self._thumb_flexion_tip_gamma,
+        )
+        root_amount = _open_straightness_guard(
+            root_amount,
+            landmarks[1],
+            landmarks[2],
+            landmarks[3],
+            landmarks[4],
+            self._flexion_open_straightness_threshold,
+        )
+        tip_amount = _open_straightness_guard(
+            tip_amount,
+            landmarks[1],
+            landmarks[2],
+            landmarks[3],
+            landmarks[4],
+            self._flexion_open_straightness_threshold,
         )
         command[0] = _lerp_command(mapping["root_open_cmd"], mapping["root_touch_cmd"], root_amount)
         command[15] = _lerp_command(mapping["tip_open_cmd"], mapping["tip_touch_cmd"], tip_amount)
@@ -1219,50 +1230,20 @@ class ManusL20RetargetNode(Node):
         return smoothed
 
     def _apply_neutral_locks(self, command: list[int]) -> None:
-        for index in self._lock_neutral_slots:
-            command[index] = self._neutral_command[index]
+        self._l20_command_adapter.apply_neutral_locks(command)
 
     def _filter_command(self, command: list[int]) -> list[int]:
-        current = [clamp_u8(value) for value in command]
-        if self._last_command is None:
-            return current
-
-        rate_limited: list[int] = []
-        for previous, value in zip(self._last_command, current):
-            delta = max(-self._max_delta, min(self._max_delta, value - previous))
-            rate_limited.append(previous + delta)
-
-        alpha = max(0.0, min(1.0, self._alpha))
-        return [
-            clamp_u8(previous + alpha * (value - previous))
-            for previous, value in zip(self._last_command, rate_limited)
-        ]
+        return filter_l20_command(
+            command,
+            last_command=self._last_command,
+            max_delta_per_cycle=self._max_delta,
+            lowpass_alpha=self._alpha,
+        )
 
     def _publish(self, command: list[int]) -> None:
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.name = [
-            "Thumb Base",
-            "Index Finger Base",
-            "Middle Finger Base",
-            "Ring Finger Base",
-            "Pinky Finger Base",
-            "Thumb Roll",
-            "Index Finger Yaw",
-            "Middle Finger Yaw",
-            "Ring Finger Yaw",
-            "Pinky Finger Yaw",
-            "Thumb Yaw",
-            "Reserved",
-            "Reserved",
-            "Reserved",
-            "Reserved",
-            "Thumb Tip",
-            "Index Finger Tip",
-            "Middle Finger Tip",
-            "Ring Finger Tip",
-            "Pinky Finger Tip",
-        ]
+        msg.name = L20_SLOT_NAMES
         msg.position = [float(value) for value in command]
         msg.velocity = [0.0] * 20
         msg.effort = [0.0] * 20
@@ -1343,31 +1324,6 @@ def _vector3_parameter(value: Any, default: list[float]) -> np.ndarray:
     if isinstance(value, (list, tuple)) and len(value) == 3:
         return np.asarray([float(item) for item in value], dtype=np.float64)
     return np.asarray(default, dtype=np.float64)
-
-
-def _joint_flexion_rad(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
-    first = a - b
-    second = c - b
-    denominator = float(np.linalg.norm(first) * np.linalg.norm(second))
-    if denominator <= 1e-8:
-        return 0.0
-    cosine = float(np.dot(first, second) / denominator)
-    interior_angle = math.acos(max(-1.0, min(1.0, cosine)))
-    return math.pi - interior_angle
-
-
-def _normalized_angle(angle: float, open_angle: float, closed_angle: float, gamma: float) -> float:
-    span = max(1e-6, float(closed_angle) - float(open_angle))
-    amount = max(0.0, min(1.0, (float(angle) - float(open_angle)) / span))
-    return amount ** gamma
-
-
-def _lerp_command(open_value: int, closed_value: int, amount: float) -> int:
-    return clamp_u8(float(open_value) + float(amount) * (float(closed_value) - float(open_value)))
-
-
-def _scale_command_delta(value: int, neutral_value: int, scale: float) -> int:
-    return clamp_u8(float(neutral_value) + float(scale) * (float(value) - float(neutral_value)))
 
 
 def _scale_command_delta_ease_in_with_deadzone(
