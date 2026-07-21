@@ -40,19 +40,19 @@ command:
   - 255
   - 255
   - 255
-  - 60
+  - 120
   - 255
   - 255
   - 255
   - 255
 samples:
   thumb_pinky_root_touch:
-    root_rad: 0.778141
-    tip_rad: 0.94648
-    root_signed_rad: 0.778141
-    tip_signed_rad: 0.94648
+    root_rad: 0.008124
+    tip_rad: 1.156268
+    root_signed_rad: 0.008124
+    tip_signed_rad: 1.156268
   thumb_natural_open:
-    root_rad: 0.003558
+    root_rad: 0.0
     tip_rad: 0.0
-    root_signed_rad: 0.003558
-    tip_signed_rad: -0.459833
+    root_signed_rad: -0.005043
+    tip_signed_rad: -0.534685

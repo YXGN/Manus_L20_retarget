@@ -96,6 +96,8 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | `config/flexion_left_calibration.yaml` | 左手四指弯曲映射标定。 |
 | `config/finger_yaw_right_calibration.yaml` | 右手四指 yaw 映射标定。 |
 | `config/finger_yaw_left_calibration.yaml` | 左手四指 yaw 映射标定。 |
+| `config/finger_yaw_ergonomics_right_calibration.yaml` | 右手四指 yaw 的 MANUS ergonomics 映射标定，存在时 launch 优先使用。 |
+| `config/finger_yaw_ergonomics_left_calibration.yaml` | 左手四指 yaw 的 MANUS ergonomics 映射标定，存在时 launch 优先使用。 |
 | `config/thumb_right_flexion_mapping.yaml` | 右手拇指 root/tip 弯曲映射。 |
 | `config/thumb_left_flexion_mapping.yaml` | 左手拇指 root/tip 弯曲映射。 |
 | `config/thumb_segment_frame_right.yaml` | 右手拇指 segment IK 的 open/touch 双姿态对齐 frame。 |
@@ -111,7 +113,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | `manus_l20_retarget/manus_landmarks.py` | MANUS raw node 到手部 landmark 的转换层；同时提取四指弯曲、四指 yaw、拇指 segment 等算法输入特征。 |
 | `manus_l20_retarget/retarget_pipeline.py` | 主链路纯函数和轻量类集合，包含 MANUS feature 提取、四指 target、L20 command adapter 和 safety filter。 |
 | `manus_l20_retarget/manus_l20_retarget_node.py` | 主运行节点。订阅 MANUS 手套消息，组合四指弯曲映射、四指 yaw 映射、拇指弯曲映射、拇指 roll/yaw segment IK，最后发布 L20 20 槽命令。 |
-| `manus_l20_retarget/calibration_capture.py` | 标定采集入口集合，推荐使用 `all` 一键合并采集；也保留四指 flexion、四指 yaw、拇指 flexion 和拇指 segment frame 的分项补采子命令。 |
+| `manus_l20_retarget/calibration_capture.py` | 标定采集入口集合，推荐使用 `all` 一键合并采集；也保留四指 flexion、四指 yaw、四指 ergonomics yaw、拇指 flexion 和拇指 segment frame 的分项补采子命令。 |
 | `manus_l20_retarget/l20_simulation.py` | MANUS 到 L20 的整手 MuJoCo 仿真入口，可选 `--thumb-debug` 查看拇指 segment IK 目标和残差。 |
 | `manus_l20_retarget/debug_tools.py` | L20/G20 调试工具集合，目前保留 `g20-probe` 槽位探测子命令。 |
 
@@ -120,7 +122,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | 部位 | 当前策略 |
 | --- | --- |
 | 四指 root/tip 弯曲 | 标定映射。 |
-| 四指 yaw | 标定映射。 |
+| 四指 yaw | 优先使用 MANUS ergonomics 的 `IndexSpread` / `MiddleSpread` / `RingSpread` / `PinkySpread` 标定映射；缺少 ergonomics yaw YAML 时回退到 raw skeleton / orientation yaw 标定映射。 |
 | 拇指 root/tip 弯曲 | 独立拇指弯曲映射。 |
 | 拇指 roll/yaw | MANUS 拇指 2->3 段映射到 L20 `thumb_metacarpals` 的 segment IK。 |
 

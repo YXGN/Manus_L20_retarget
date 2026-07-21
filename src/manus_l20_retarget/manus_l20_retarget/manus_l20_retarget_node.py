@@ -156,8 +156,6 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("finger_yaw_open_rad", DEFAULT_FINGER_YAW_OPEN_RAD)
         self.declare_parameter("finger_yaw_command_gain", -140.0)
         self.declare_parameter("finger_yaw_max_delta", 35)
-        self.declare_parameter("finger_yaw_flexion_gate_start", 0.5)
-        self.declare_parameter("finger_yaw_flexion_gate_end", 1.0)
         self.declare_parameter("enable_thumb_yaw", False)
         self.declare_parameter("enable_thumb_roll", False)
         self.declare_parameter("enable_thumb_flexion_mapping", False)
@@ -381,14 +379,6 @@ class ManusL20RetargetNode(Node):
         self._finger_yaw_source = str(self.get_parameter("finger_yaw_source").value)
         self._finger_yaw_command_gain = float(self.get_parameter("finger_yaw_command_gain").value)
         self._finger_yaw_max_delta = max(0, int(self.get_parameter("finger_yaw_max_delta").value))
-        self._finger_yaw_flexion_gate_start = max(
-            0.0,
-            min(1.0, float(self.get_parameter("finger_yaw_flexion_gate_start").value)),
-        )
-        self._finger_yaw_flexion_gate_end = max(
-            0.0,
-            min(1.0, float(self.get_parameter("finger_yaw_flexion_gate_end").value)),
-        )
         self._apply_finger_yaw_calibration_path(str(self.get_parameter("finger_yaw_calibration_path").value))
         self._flexion_open_straightness_threshold = max(
             0.0,
@@ -558,12 +548,22 @@ class ManusL20RetargetNode(Node):
             "pip_orientation",
             "ip_orientation",
             "dip_orientation",
+            "ergonomics",
         ):
             self.get_logger().warning(f"unknown finger yaw calibration source={source!r}; using {self._finger_yaw_source!r}")
             source = self._finger_yaw_source
+        ergonomics_keys = data.get("ergonomics_keys")
+        if source == "ergonomics":
+            if not isinstance(ergonomics_keys, list) or len(ergonomics_keys) != 4:
+                self.get_logger().warning(f"finger yaw ergonomics calibration missing four ergonomics_keys: {path}")
+                return
+            ergonomics_keys = [str(key) for key in ergonomics_keys]
+        else:
+            ergonomics_keys = []
         try:
             self._finger_yaw_mapping = {
                 "source": source,
+                "ergonomics_keys": ergonomics_keys,
                 "open_rad": _float_list_parameter(open_sample.get("yaw_rad"), DEFAULT_FINGER_YAW_OPEN_RAD, length=4),
                 "close_rad": _float_list_parameter(close_sample.get("yaw_rad"), DEFAULT_FINGER_YAW_OPEN_RAD, length=4),
                 "spread_rad": _float_list_parameter(spread_sample.get("yaw_rad"), DEFAULT_FINGER_YAW_OPEN_RAD, length=4),
@@ -587,6 +587,7 @@ class ManusL20RetargetNode(Node):
         self.get_logger().info(
             "loaded finger yaw calibration "
             f"path={path}, source={source}, "
+            f"ergonomics_keys={ergonomics_keys}, "
             f"open_rad={np.round(self._finger_yaw_mapping['open_rad'], 5).tolist()}, "
             f"close_rad={np.round(self._finger_yaw_mapping['close_rad'], 5).tolist()}, "
             f"spread_rad={np.round(self._finger_yaw_mapping['spread_rad'], 5).tolist()}, "
@@ -943,7 +944,7 @@ class ManusL20RetargetNode(Node):
         )
         command = self._l20_command_adapter.command_from_targets(targets)
         if self._enable_finger_yaw:
-            self._apply_finger_yaw(command, landmarks, features.raw_nodes, targets)
+            self._apply_finger_yaw(command, landmarks, features.raw_nodes, features.ergonomics)
         if self._enable_thumb_flexion_mapping:
             self._apply_thumb_flexion_mapping(command, landmarks)
         if self._enable_thumb_yaw or self._enable_thumb_roll:
@@ -959,11 +960,21 @@ class ManusL20RetargetNode(Node):
         command: list[int],
         landmarks: np.ndarray,
         raw_nodes: list[Any] | None = None,
-        targets: HandRetargetTargets | None = None,
+        ergonomics: dict[str, float] | None = None,
     ) -> None:
         if self._finger_yaw_mapping is not None:
             source = str(self._finger_yaw_mapping["source"])
-            if source == "mcp_orientation":
+            if source == "ergonomics":
+                if ergonomics is None:
+                    return
+                keys = self._finger_yaw_mapping.get("ergonomics_keys") or []
+                if len(keys) != 4:
+                    return
+                try:
+                    yaw_angles = np.asarray([float(ergonomics[str(key)]) for key in keys], dtype=np.float64)
+                except (KeyError, TypeError, ValueError):
+                    return
+            elif source == "mcp_orientation":
                 if raw_nodes is None:
                     return
                 yaw_angles = _finger_mcp_orientation_yaw_rad(raw_nodes)
@@ -1009,8 +1020,7 @@ class ManusL20RetargetNode(Node):
                         int(spread_cmd[local_index]),
                         spread_amount,
                     )
-                scale = self._finger_yaw_flexion_scale(targets, local_index)
-                command[slot] = _lerp_command(open_value, yaw_command, scale)
+                command[slot] = yaw_command
             return
 
         yaw_angles = _finger_yaw_rad(landmarks, source=self._finger_yaw_source)
@@ -1020,30 +1030,7 @@ class ManusL20RetargetNode(Node):
             delta = self._finger_yaw_command_gain * (float(angle) - self._finger_yaw_open_rad[local_index])
             delta = max(-self._finger_yaw_max_delta, min(self._finger_yaw_max_delta, delta))
             yaw_command = clamp_u8(neutral + delta)
-            scale = self._finger_yaw_flexion_scale(targets, local_index)
-            command[slot] = _lerp_command(neutral, yaw_command, scale)
-
-    def _finger_yaw_flexion_scale(
-        self,
-        targets: HandRetargetTargets | None,
-        local_index: int,
-    ) -> float:
-        if targets is None:
-            return 1.0
-        finger_index = local_index + 1
-        target = targets.finger_flexion.get(finger_index)
-        if target is None:
-            return 1.0
-        start = self._finger_yaw_flexion_gate_start
-        end = self._finger_yaw_flexion_gate_end
-        if end <= start:
-            return 1.0
-        amount = max(0.0, min(1.0, float(target.root_amount)))
-        if amount <= start:
-            return 1.0
-        if amount >= end:
-            return 0.0
-        return 1.0 - (amount - start) / max(1e-6, end - start)
+            command[slot] = yaw_command
 
     def _apply_thumb_pose(self, command: list[int], landmarks: np.ndarray) -> None:
         thumb_pose = _thumb_pose_features(landmarks)

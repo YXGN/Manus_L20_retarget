@@ -2,13 +2,13 @@ schema: manus_l20.thumb_segment_frame.v1
 segment_start: 2
 segment_end: 3
 manus_open_vector:
-- -0.021276
-- 0.027589
-- 0.009462
+- -0.021677
+- 0.026662
+- 0.009947
 manus_touch_vector:
-- 0.01953
-- 0.028798
-- 0.009591
+- 0.025412
+- 0.02231
+- 0.011674
 robot_open_command:
 - 254
 - 248
@@ -46,7 +46,7 @@ robot_touch_command:
 - 255
 - 255
 - 255
-- 60
+- 120
 - 255
 - 255
 - 255
