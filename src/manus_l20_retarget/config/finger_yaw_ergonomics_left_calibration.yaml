@@ -1,0 +1,164 @@
+schema: manus_l20.finger_yaw_calibration.v1
+finger_order:
+- index
+- middle
+- ring
+- pinky
+source: ergonomics
+source_mode: ergonomics_auto
+ergonomics_keys:
+- IndexSpread
+- MiddleSpread
+- RingSpread
+- PinkySpread
+ergonomics_source_ranges:
+  IndexSpread: 19.271722
+  MiddleSpread: 5.919084
+  RingSpread: 4.80232
+  PinkySpread: 29.202272
+command:
+  natural_open_command:
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 128
+  - 163
+  - 129
+  - 86
+  - 62
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  finger_close_command:
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 128
+  - 60
+  - 85
+  - 136
+  - 166
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  finger_spread_command:
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 128
+  - 255
+  - 169
+  - 46
+  - 0
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+samples:
+  natural_open:
+    yaw_rad:
+    - 15.839604
+    - 4.989139
+    - -3.479439
+    - -27.955183
+    ergonomics:
+      IndexDIPStretch: -12.147734
+      IndexMCPStretch: 1.234305
+      IndexPIPStretch: -0.170182
+      IndexSpread: 15.839604
+      MiddleDIPStretch: -19.460883
+      MiddleMCPStretch: 2.917607
+      MiddlePIPStretch: -0.343716
+      MiddleSpread: 4.989139
+      PinkyDIPStretch: -20.144646
+      PinkyMCPStretch: 25.274988
+      PinkyPIPStretch: -0.563793
+      PinkySpread: -27.955183
+      RingDIPStretch: -6.388294
+      RingMCPStretch: 6.471664
+      RingPIPStretch: -0.067599
+      RingSpread: -3.479439
+      ThumbDIPStretch: -23.682183
+      ThumbMCPSpread: 9.258511
+      ThumbMCPStretch: 49.365836
+      ThumbPIPStretch: -0.264401
+  finger_close:
+    yaw_rad:
+    - -3.432118
+    - -0.929945
+    - 0.468099
+    - 1.247089
+    ergonomics:
+      IndexDIPStretch: -28.191141
+      IndexMCPStretch: 7.008388
+      IndexPIPStretch: -0.452223
+      IndexSpread: -3.432118
+      MiddleDIPStretch: -31.390094
+      MiddleMCPStretch: 7.32979
+      MiddlePIPStretch: -0.017388
+      MiddleSpread: -0.929945
+      PinkyDIPStretch: -34.760113
+      PinkyMCPStretch: 30.29719
+      PinkyPIPStretch: -0.926355
+      PinkySpread: 1.247089
+      RingDIPStretch: -25.857591
+      RingMCPStretch: 12.203263
+      RingPIPStretch: 4.717181
+      RingSpread: 0.468099
+      ThumbDIPStretch: -22.787355
+      ThumbMCPSpread: 4.808218
+      ThumbMCPStretch: 44.212191
+      ThumbPIPStretch: 2.051503
+  finger_spread:
+    yaw_rad:
+    - 21.275257
+    - 3.207566
+    - -8.281759
+    - -41.354782
+    ergonomics:
+      IndexDIPStretch: -21.093418
+      IndexMCPStretch: -7.572327
+      IndexPIPStretch: -0.154746
+      IndexSpread: 21.275257
+      MiddleDIPStretch: -24.749044
+      MiddleMCPStretch: -5.387267
+      MiddlePIPStretch: -0.19553
+      MiddleSpread: 3.207566
+      PinkyDIPStretch: -31.505593
+      PinkyMCPStretch: 27.238914
+      PinkyPIPStretch: -0.653487
+      PinkySpread: -41.354782
+      RingDIPStretch: -16.855706
+      RingMCPStretch: -5.003835
+      RingPIPStretch: 3.67993
+      RingSpread: -8.281759
+      ThumbDIPStretch: -41.521031
+      ThumbMCPSpread: 7.091432
+      ThumbMCPStretch: 49.68891
+      ThumbPIPStretch: -0.311018

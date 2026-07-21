@@ -61,6 +61,8 @@ DEFAULT_THUMB_NATURAL_OPEN_COMMAND = [
 POSITION_SOURCES = ("pip", "dip", "tip")
 ORIENTATION_SOURCES = ("mcp_orientation", "pip_orientation", "ip_orientation", "dip_orientation")
 ORIENTATION_AND_POSITION_SOURCES = (*POSITION_SOURCES, *ORIENTATION_SOURCES)
+FINGER_NAMES = ("index", "middle", "ring", "pinky")
+ERGONOMICS_YAW_TOKENS = ("spread", "abduction", "adduction", "abd", "add", "yaw")
 
 
 class FlexionCalibrationCapture(Node):
@@ -167,6 +169,38 @@ class FingerYawCalibrationCapture(Node):
         return {
             "yaw_rad": all_yaw_rad[selected_source],
             "all_yaw_rad": all_yaw_rad,
+        }
+
+
+class FingerYawErgonomicsCalibrationCapture(Node):
+    def __init__(self, glove_topic: str) -> None:
+        super().__init__("manus_l20_finger_yaw_ergonomics_calibration_capture")
+        self._lock = threading.Lock()
+        self._collecting = False
+        self._samples: list[dict[str, float]] = []
+        self.create_subscription(ManusGlove, glove_topic, self._on_glove, 10)
+
+    def _on_glove(self, msg: ManusGlove) -> None:
+        ergonomics = {str(entry.type): float(entry.value) for entry in msg.ergonomics if entry.type}
+        with self._lock:
+            if self._collecting:
+                self._samples.append(ergonomics)
+
+    def capture(self, duration_sec: float) -> dict[str, float]:
+        with self._lock:
+            self._samples = []
+            self._collecting = True
+        time.sleep(duration_sec)
+        with self._lock:
+            self._collecting = False
+            samples = list(self._samples)
+        if not samples:
+            raise RuntimeError("no MANUS glove samples captured")
+        keys = sorted({key for sample in samples for key in sample})
+        return {
+            key: round(float(statistics.fmean(sample[key] for sample in samples if key in sample)), 6)
+            for key in keys
+            if any(key in sample for sample in samples)
         }
 
 
@@ -524,6 +558,69 @@ def _select_best_source(samples: dict[str, dict[str, Any]], *, mode: str) -> str
     return max(totals, key=totals.get)
 
 
+def _build_finger_yaw_ergonomics_calibration(
+    samples: dict[str, dict[str, float]],
+    output_path: str,
+    ergonomics_keys: list[str] | None = None,
+) -> dict[str, Any]:
+    selected_keys = ergonomics_keys or _select_ergonomics_yaw_keys(samples)
+    command = _existing_command(output_path) or {
+        "natural_open_command": DEFAULT_L20_OPEN_COMMAND,
+        "finger_close_command": DEFAULT_L20_FINGER_CLOSE_COMMAND,
+        "finger_spread_command": DEFAULT_L20_FINGER_SPREAD_COMMAND,
+    }
+    selected_samples = {
+        label: {
+            "yaw_rad": [round(float(sample.get(key, 0.0)), 6) for key in selected_keys],
+            "ergonomics": sample,
+        }
+        for label, sample in samples.items()
+    }
+    return {
+        "schema": "manus_l20.finger_yaw_calibration.v1",
+        "finger_order": list(FINGER_NAMES),
+        "source": "ergonomics",
+        "source_mode": "ergonomics_auto" if not ergonomics_keys else "ergonomics_keys",
+        "ergonomics_keys": selected_keys,
+        "ergonomics_source_ranges": _ergonomics_key_ranges(samples, selected_keys),
+        "command": command,
+        "samples": selected_samples,
+    }
+
+
+def _select_ergonomics_yaw_keys(samples: dict[str, dict[str, float]]) -> list[str]:
+    keys = sorted({key for sample in samples.values() for key in sample})
+    if not keys:
+        raise RuntimeError("MANUS ergonomics samples are empty")
+    selected: list[str] = []
+    for finger in FINGER_NAMES:
+        candidates = [
+            key for key in keys
+            if finger in _normalized_key(key) and any(token in _normalized_key(key) for token in ERGONOMICS_YAW_TOKENS)
+        ]
+        if not candidates:
+            candidates = [key for key in keys if finger in _normalized_key(key)]
+        if not candidates:
+            raise RuntimeError(f"no MANUS ergonomics key found for finger yaw: {finger}; available keys={keys}")
+        selected.append(max(candidates, key=lambda key: _ergonomics_key_range(samples, key)))
+    return selected
+
+
+def _ergonomics_key_ranges(samples: dict[str, dict[str, float]], keys: list[str]) -> dict[str, float]:
+    return {key: round(_ergonomics_key_range(samples, key), 6) for key in keys}
+
+
+def _ergonomics_key_range(samples: dict[str, dict[str, float]], key: str) -> float:
+    open_value = float(samples.get("natural_open", {}).get(key, 0.0))
+    close_value = float(samples.get("finger_close", {}).get(key, open_value))
+    spread_value = float(samples.get("finger_spread", {}).get(key, open_value))
+    return max(abs(close_value - open_value), abs(spread_value - open_value))
+
+
+def _normalized_key(key: str) -> str:
+    return "".join(ch.lower() for ch in str(key) if ch.isalnum())
+
+
 def _build_thumb_flexion_calibration(samples: dict[str, dict[str, float]], output_path: str) -> dict[str, Any]:
     open_sample = samples["thumb_natural_open"]
     touch_sample = samples["thumb_pinky_root_touch"]
@@ -659,6 +756,41 @@ def run_finger_yaw(parsed: argparse.Namespace) -> None:
             )
         )
         print(f"Saved finger yaw calibration to {output_path}")
+    finally:
+        _shutdown_capture_node(node, spin_thread)
+
+
+def run_finger_yaw_ergonomics(parsed: argparse.Namespace) -> None:
+    rclpy.init()
+    node = FingerYawErgonomicsCalibrationCapture(parsed.glove_topic)
+    spin_thread = _spin_capture_node(node)
+    labels = [
+        ("natural_open", "手指自然张开"),
+        ("finger_close", "四指并拢"),
+        ("finger_spread", "四指外展"),
+    ]
+    samples: dict[str, dict[str, float]] = {}
+    try:
+        for label, prompt in labels:
+            input(f"Set pose '{label}' ({prompt}), hold still, then press Enter...")
+            print(f"Capturing '{label}' ergonomics for {parsed.duration:.1f}s...")
+            samples[label] = node.capture(parsed.duration)
+            print(yaml.safe_dump({label: samples[label]}, sort_keys=False, allow_unicode=True))
+        ergonomics_keys = _parse_key_list(parsed.ergonomics_keys)
+        calibration = _build_finger_yaw_ergonomics_calibration(samples, parsed.output, ergonomics_keys)
+        output_path = _save_yaml(calibration, parsed.output)
+        print(
+            yaml.safe_dump(
+                {
+                    "selected_source": calibration["source"],
+                    "ergonomics_keys": calibration["ergonomics_keys"],
+                    "ergonomics_source_ranges": calibration["ergonomics_source_ranges"],
+                },
+                sort_keys=False,
+                allow_unicode=True,
+            )
+        )
+        print(f"Saved ergonomics finger yaw calibration to {output_path}")
     finally:
         _shutdown_capture_node(node, spin_thread)
 
@@ -879,6 +1011,15 @@ def _add_common_glove_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--distal-mode", default="dip")
 
 
+def _parse_key_list(value: str) -> list[str] | None:
+    keys = [item.strip() for item in str(value).split(",") if item.strip()]
+    if not keys:
+        return None
+    if len(keys) != 4:
+        raise RuntimeError("--ergonomics-keys must contain exactly 4 comma-separated keys: index,middle,ring,pinky")
+    return keys
+
+
 def _build_parser() -> argparse.ArgumentParser:
     root = _default_workspace_root()
     config_root = root / "src" / "manus_l20_retarget" / "config"
@@ -899,6 +1040,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     finger_yaw.add_argument("--output", default=str(config_root / "finger_yaw_right_calibration.yaml"))
     finger_yaw.set_defaults(func=run_finger_yaw)
+
+    ergonomics_yaw = subparsers.add_parser(
+        "ergonomics-yaw",
+        description="Capture a non-invasive four-finger yaw calibration using MANUS ergonomics values.",
+    )
+    ergonomics_yaw.add_argument("--glove-topic", default="/manus_glove_0")
+    ergonomics_yaw.add_argument("--duration", type=float, default=2.0)
+    ergonomics_yaw.add_argument("--ergonomics-keys", default="")
+    ergonomics_yaw.add_argument("--output", default=str(config_root / "finger_yaw_ergonomics_right_test.yaml"))
+    ergonomics_yaw.set_defaults(func=run_finger_yaw_ergonomics)
 
     thumb_flexion = subparsers.add_parser("thumb-flexion", description="Capture thumb flexion mapping.")
     _add_common_glove_args(thumb_flexion)
