@@ -10,6 +10,29 @@ import yaml
 
 COMMAND_LENGTH = 20
 FINGERS = ("thumb", "index", "middle", "ring", "pinky")
+CANONICAL_ERGONOMICS_KEYS = {
+    "IndexDIPStretch",
+    "MiddleDIPStretch",
+    "RingDIPStretch",
+    "PinkyDIPStretch",
+    "IndexPIPStretch",
+    "MiddlePIPStretch",
+    "RingPIPStretch",
+    "PinkyPIPStretch",
+    "IndexMCPStretch",
+    "MiddleMCPStretch",
+    "RingMCPStretch",
+    "PinkyMCPStretch",
+    "ThumbMCPSpread",
+    "ThumbMCPStretch",
+    "ThumbPIPStretch",
+    "ThumbDIPStretch",
+    "IndexSpread",
+    "MiddleSpread",
+    "RingSpread",
+    "PinkySpread",
+}
+SIDE_PREFIXES = ("LeftFinger", "RightFinger", "left_", "right_", "Left", "Right")
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
@@ -48,6 +71,32 @@ def ergonomics_value(ergonomics: Mapping[str, float], name: str, fallback: float
     return finite_or(ergonomics.get(name), fallback)
 
 
+def canonical_ergonomics(ergonomics: Mapping[str, float]) -> dict[str, float]:
+    normalized: dict[str, float] = {}
+    for raw_key, raw_value in ergonomics.items():
+        key = canonical_ergonomics_key(str(raw_key))
+        if key:
+            normalized[key] = finite_or(raw_value, normalized.get(key, 0.0))
+    return normalized
+
+
+def canonical_ergonomics_key(raw_key: str) -> str | None:
+    key = raw_key.strip()
+    if not key:
+        return None
+    if key in CANONICAL_ERGONOMICS_KEYS:
+        return key
+    for prefix in SIDE_PREFIXES:
+        if key.startswith(prefix):
+            key = key[len(prefix) :]
+            break
+    if key in CANONICAL_ERGONOMICS_KEYS:
+        return key
+    if key in {"IndexMCPSpread", "MiddleMCPSpread", "RingMCPSpread", "PinkyMCPSpread"}:
+        return key.replace("MCPSpread", "Spread")
+    return None
+
+
 def _command_list(value: object, fallback: int) -> list[int]:
     if isinstance(value, list) and len(value) == COMMAND_LENGTH:
         return [clamp_u8(item) for item in value]
@@ -79,6 +128,7 @@ class RevoStyleL20Retarget:
         self._max_delta = max(0, int(finite_or(smoothing.get("max_delta_per_cycle"), 0)))
 
     def retarget(self, ergonomics: Mapping[str, float], *, smooth: bool = True) -> tuple[dict[str, float], list[int]]:
+        ergonomics = canonical_ergonomics(ergonomics)
         q = self.compute_joint_targets(ergonomics)
         command = self.joints_to_l20_command(q, ergonomics)
         self._last_target = command
@@ -205,6 +255,7 @@ class RevoStyleL20Retarget:
         self._set_joint_slot(command, 8, "ring_spread", q)
         self._set_joint_slot(command, 9, "pinky_spread", q)
         self._set_joint_slot(command, 10, "thumb_yaw", q)
+        self._apply_spread_flexion_gate(command, q, ergonomics)
 
         if not (direct and ergonomics is not None):
             self._set_tip_slot(command, 15, "thumb", q)
@@ -283,6 +334,66 @@ class RevoStyleL20Retarget:
         amount = self._normalized_amount(range_name, value_deg)
         command[slot] = clamp_u8(self._open_command[slot] + amount * (self._closed_command[slot] - self._open_command[slot]))
 
+    def _apply_spread_flexion_gate(
+        self,
+        command: list[int],
+        q: Mapping[str, float],
+        ergonomics: Mapping[str, float] | None,
+    ) -> None:
+        spread = self.config.get("spread", {})
+        spread = spread if isinstance(spread, Mapping) else {}
+        start = finite_or(spread.get("flexion_gate_start"), 0.0)
+        end = finite_or(spread.get("flexion_gate_end"), 0.0)
+        if end <= start:
+            return
+        amount_source = str(spread.get("flexion_gate_source", "root")).lower()
+        direct = bool(self.config.get("l20_command", {}).get("direct_ergonomics_mapping", False))
+        for local_index, finger in enumerate(("index", "middle", "ring", "pinky")):
+            slot = 6 + local_index
+            root_amount = self._finger_flexion_amount(finger, "root", q, ergonomics, direct)
+            tip_amount = self._finger_flexion_amount(finger, "tip", q, ergonomics, direct)
+            if amount_source == "tip":
+                amount = tip_amount
+            elif amount_source == "max":
+                amount = max(root_amount, tip_amount)
+            else:
+                amount = root_amount
+            if amount <= start:
+                continue
+            if amount >= end:
+                scale = 0.0
+            else:
+                scale = 1.0 - (amount - start) / max(1e-9, end - start)
+            command[slot] = _lerp_command(self._open_command[slot], command[slot], scale)
+
+    def _finger_flexion_amount(
+        self,
+        finger: str,
+        part: str,
+        q: Mapping[str, float],
+        ergonomics: Mapping[str, float] | None,
+        direct: bool,
+    ) -> float:
+        if direct and ergonomics is not None:
+            range_cfg = self.config.get("l20_command", {}).get("ergonomics_ranges", {})
+            finger_cfg = range_cfg.get(finger, {}) if isinstance(range_cfg, Mapping) else {}
+            if isinstance(finger_cfg, Mapping):
+                amount = self._ergonomics_amount(
+                    ergonomics,
+                    finger_cfg.get(f"{part}_key"),
+                    finger_cfg.get(f"{part}_range"),
+                )
+                if amount is not None:
+                    return amount
+        range_name = f"{finger}_mcp" if part == "root" else f"{finger}_tip"
+        if part == "root":
+            value_deg = rad_to_deg(finite_or(q.get(f"{finger}_mcp"), 0.0))
+        else:
+            value_deg = 0.45 * rad_to_deg(finite_or(q.get(f"{finger}_pip"), 0.0)) + 0.55 * rad_to_deg(
+                finite_or(q.get(f"{finger}_dip"), 0.0)
+            )
+        return self._normalized_amount(range_name, value_deg)
+
     def _normalized_amount(self, range_name: str, value_deg: float) -> float:
         ranges = self.config.get("l20_command", {}).get("joint_ranges_deg", {})
         raw = ranges.get(range_name, [0.0, 1.0]) if isinstance(ranges, Mapping) else [0.0, 1.0]
@@ -302,3 +413,7 @@ class RevoStyleL20Retarget:
                 limited_target = int(previous + clamp(target - previous, -self._max_delta, self._max_delta))
             out.append(clamp_u8(previous + self._alpha * (limited_target - previous)))
         return out
+
+
+def _lerp_command(open_value: int, target_value: int, amount: float) -> int:
+    return clamp_u8(open_value + clamp(amount, 0.0, 1.0) * (target_value - open_value))

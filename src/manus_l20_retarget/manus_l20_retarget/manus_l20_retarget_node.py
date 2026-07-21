@@ -29,10 +29,12 @@ from .retarget_pipeline import (
     FINGER_LANDMARKS,
     L20_SLOT_NAMES,
     HandFeatures,
+    HandRetargetTargets,
     L20CommandAdapter,
     compute_landmark_flexion_targets,
     extract_hand_features,
     filter_l20_command,
+    _directed_finger_flexion_rad,
     _joint_flexion_rad,
     _lerp_command,
     _normalized_angle,
@@ -154,12 +156,16 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("finger_yaw_open_rad", DEFAULT_FINGER_YAW_OPEN_RAD)
         self.declare_parameter("finger_yaw_command_gain", -140.0)
         self.declare_parameter("finger_yaw_max_delta", 35)
+        self.declare_parameter("finger_yaw_flexion_gate_start", 0.5)
+        self.declare_parameter("finger_yaw_flexion_gate_end", 1.0)
         self.declare_parameter("enable_thumb_yaw", False)
         self.declare_parameter("enable_thumb_roll", False)
         self.declare_parameter("enable_thumb_flexion_mapping", False)
         self.declare_parameter("thumb_flexion_mapping_path", "")
         self.declare_parameter("thumb_flexion_root_gamma", 1.0)
         self.declare_parameter("thumb_flexion_tip_gamma", 1.0)
+        self.declare_parameter("thumb_flexion_open_straightness_threshold", 0.0)
+        self.declare_parameter("thumb_flexion_open_angle_deadband_rad", 0.0)
         self.declare_parameter("enable_thumb_ik", False)
         self.declare_parameter("thumb_ik_mode", "segment")
         self.declare_parameter("thumb_ik_debug", False)
@@ -191,10 +197,11 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("thumb_roll_command_gain", -160.0)
         self.declare_parameter("thumb_yaw_max_delta", 80)
         self.declare_parameter("thumb_roll_max_delta", 80)
-        self.declare_parameter("landmark_transform", "pico_native_to_rh")
+        self.declare_parameter("landmark_transform", "right_glove_to_right_retarget")
         self.declare_parameter("wrist_mode", "estimate")
         self.declare_parameter("distal_mode", "dip")
         self.declare_parameter("flexion_open_straightness_threshold", 0.985)
+        self.declare_parameter("flexion_open_angle_deadband_rad", 0.2)
 
         self._lock = threading.Lock()
         self._latest_msg: ManusGlove | None = None
@@ -243,6 +250,8 @@ class ManusL20RetargetNode(Node):
         self._enable_thumb_roll = bool(self.get_parameter("enable_thumb_roll").value)
         self._enable_thumb_flexion_mapping = bool(self.get_parameter("enable_thumb_flexion_mapping").value)
         self._thumb_flexion_mapping: dict[str, Any] | None = None
+        self._root_flexion_direction_sign: list[float] | None = None
+        self._tip_flexion_direction_sign: list[float] | None = None
         self._thumb_flexion_root_gamma = max(
             0.05,
             float(self.get_parameter("thumb_flexion_root_gamma").value),
@@ -250,6 +259,14 @@ class ManusL20RetargetNode(Node):
         self._thumb_flexion_tip_gamma = max(
             0.05,
             float(self.get_parameter("thumb_flexion_tip_gamma").value),
+        )
+        self._thumb_flexion_open_straightness_threshold = max(
+            0.0,
+            min(1.0, float(self.get_parameter("thumb_flexion_open_straightness_threshold").value)),
+        )
+        self._thumb_flexion_open_angle_deadband_rad = max(
+            0.0,
+            float(self.get_parameter("thumb_flexion_open_angle_deadband_rad").value),
         )
         self._enable_thumb_ik = bool(self.get_parameter("enable_thumb_ik").value)
         self._thumb_ik_mode = str(self.get_parameter("thumb_ik_mode").value).strip().lower()
@@ -364,10 +381,22 @@ class ManusL20RetargetNode(Node):
         self._finger_yaw_source = str(self.get_parameter("finger_yaw_source").value)
         self._finger_yaw_command_gain = float(self.get_parameter("finger_yaw_command_gain").value)
         self._finger_yaw_max_delta = max(0, int(self.get_parameter("finger_yaw_max_delta").value))
+        self._finger_yaw_flexion_gate_start = max(
+            0.0,
+            min(1.0, float(self.get_parameter("finger_yaw_flexion_gate_start").value)),
+        )
+        self._finger_yaw_flexion_gate_end = max(
+            0.0,
+            min(1.0, float(self.get_parameter("finger_yaw_flexion_gate_end").value)),
+        )
         self._apply_finger_yaw_calibration_path(str(self.get_parameter("finger_yaw_calibration_path").value))
         self._flexion_open_straightness_threshold = max(
             0.0,
             min(1.0, float(self.get_parameter("flexion_open_straightness_threshold").value)),
+        )
+        self._flexion_open_angle_deadband_rad = max(
+            0.0,
+            float(self.get_parameter("flexion_open_angle_deadband_rad").value),
         )
         self._thumb_yaw_open_rad = float(self.get_parameter("thumb_yaw_open_rad").value)
         self._thumb_roll_open_rad = float(self.get_parameter("thumb_roll_open_rad").value)
@@ -442,6 +471,27 @@ class ManusL20RetargetNode(Node):
             data.get("tip_flexion_closed_rad"),
             self._tip_closed_rad,
             length=5,
+        )
+        samples = data.get("samples")
+        open_sample = samples.get("open") if isinstance(samples, dict) else None
+        fist_sample = samples.get("four_finger_fist") if isinstance(samples, dict) else None
+        has_signed_samples = (
+            isinstance(open_sample, dict)
+            and isinstance(fist_sample, dict)
+            and "root_signed_rad" in open_sample
+            and "root_signed_rad" in fist_sample
+            and "tip_signed_rad" in open_sample
+            and "tip_signed_rad" in fist_sample
+        )
+        self._root_flexion_direction_sign = (
+            _float_list_parameter(data.get("root_flexion_direction_sign"), [1.0] * 5, length=5)
+            if has_signed_samples and data.get("root_flexion_direction_sign") is not None
+            else None
+        )
+        self._tip_flexion_direction_sign = (
+            _float_list_parameter(data.get("tip_flexion_direction_sign"), [1.0] * 5, length=5)
+            if has_signed_samples and data.get("tip_flexion_direction_sign") is not None
+            else None
         )
         self._apply_flexion_command_calibration(data.get("command"))
         self.get_logger().info(
@@ -578,6 +628,16 @@ class ManusL20RetargetNode(Node):
                 "root_touch_rad": float(touch_sample["root_rad"]),
                 "tip_open_rad": float(open_sample["tip_rad"]),
                 "tip_touch_rad": float(touch_sample["tip_rad"]),
+                "root_direction_sign": (
+                    float(data["root_flexion_direction_sign"])
+                    if data.get("root_flexion_direction_sign") is not None
+                    else None
+                ),
+                "tip_direction_sign": (
+                    float(data["tip_flexion_direction_sign"])
+                    if data.get("tip_flexion_direction_sign") is not None
+                    else None
+                ),
                 "root_open_cmd": int(open_command[0]),
                 "root_touch_cmd": int(touch_command[0]),
                 "tip_open_cmd": int(open_command[15]),
@@ -874,13 +934,16 @@ class ManusL20RetargetNode(Node):
             root_closed_rad=self._root_closed_rad,
             tip_open_rad=self._tip_open_rad,
             tip_closed_rad=self._tip_closed_rad,
+            root_direction_sign=self._root_flexion_direction_sign,
+            tip_direction_sign=self._tip_flexion_direction_sign,
             root_gamma=self._root_gamma,
             tip_gamma=self._tip_gamma,
             open_straightness_threshold=self._flexion_open_straightness_threshold,
+            open_angle_deadband_rad=self._flexion_open_angle_deadband_rad,
         )
         command = self._l20_command_adapter.command_from_targets(targets)
         if self._enable_finger_yaw:
-            self._apply_finger_yaw(command, landmarks, features.raw_nodes)
+            self._apply_finger_yaw(command, landmarks, features.raw_nodes, targets)
         if self._enable_thumb_flexion_mapping:
             self._apply_thumb_flexion_mapping(command, landmarks)
         if self._enable_thumb_yaw or self._enable_thumb_roll:
@@ -896,6 +959,7 @@ class ManusL20RetargetNode(Node):
         command: list[int],
         landmarks: np.ndarray,
         raw_nodes: list[Any] | None = None,
+        targets: HandRetargetTargets | None = None,
     ) -> None:
         if self._finger_yaw_mapping is not None:
             source = str(self._finger_yaw_mapping["source"])
@@ -922,6 +986,7 @@ class ManusL20RetargetNode(Node):
             spread_cmd = self._finger_yaw_mapping["spread_cmd"]
             for local_index, angle in enumerate(yaw_angles):
                 slot = 6 + local_index
+                open_value = int(open_cmd[local_index])
                 close_amount = _normalized_signed_segment(
                     float(angle),
                     float(open_rad[local_index]),
@@ -933,17 +998,19 @@ class ManusL20RetargetNode(Node):
                     float(spread_rad[local_index]),
                 )
                 if close_amount >= spread_amount:
-                    command[slot] = _lerp_command(
-                        int(open_cmd[local_index]),
+                    yaw_command = _lerp_command(
+                        open_value,
                         int(close_cmd[local_index]),
                         close_amount,
                     )
                 else:
-                    command[slot] = _lerp_command(
-                        int(open_cmd[local_index]),
+                    yaw_command = _lerp_command(
+                        open_value,
                         int(spread_cmd[local_index]),
                         spread_amount,
                     )
+                scale = self._finger_yaw_flexion_scale(targets, local_index)
+                command[slot] = _lerp_command(open_value, yaw_command, scale)
             return
 
         yaw_angles = _finger_yaw_rad(landmarks, source=self._finger_yaw_source)
@@ -952,7 +1019,31 @@ class ManusL20RetargetNode(Node):
             neutral = self._neutral_command[slot]
             delta = self._finger_yaw_command_gain * (float(angle) - self._finger_yaw_open_rad[local_index])
             delta = max(-self._finger_yaw_max_delta, min(self._finger_yaw_max_delta, delta))
-            command[slot] = clamp_u8(neutral + delta)
+            yaw_command = clamp_u8(neutral + delta)
+            scale = self._finger_yaw_flexion_scale(targets, local_index)
+            command[slot] = _lerp_command(neutral, yaw_command, scale)
+
+    def _finger_yaw_flexion_scale(
+        self,
+        targets: HandRetargetTargets | None,
+        local_index: int,
+    ) -> float:
+        if targets is None:
+            return 1.0
+        finger_index = local_index + 1
+        target = targets.finger_flexion.get(finger_index)
+        if target is None:
+            return 1.0
+        start = self._finger_yaw_flexion_gate_start
+        end = self._finger_yaw_flexion_gate_end
+        if end <= start:
+            return 1.0
+        amount = max(0.0, min(1.0, float(target.root_amount)))
+        if amount <= start:
+            return 1.0
+        if amount >= end:
+            return 0.0
+        return 1.0 - (amount - start) / max(1e-6, end - start)
 
     def _apply_thumb_pose(self, command: list[int], landmarks: np.ndarray) -> None:
         thumb_pose = _thumb_pose_features(landmarks)
@@ -971,19 +1062,31 @@ class ManusL20RetargetNode(Node):
         mapping = self._thumb_flexion_mapping
         if mapping is None:
             return
-        root_angle = _joint_flexion_rad(landmarks[1], landmarks[2], landmarks[3])
-        tip_angle = _joint_flexion_rad(landmarks[2], landmarks[3], landmarks[4])
+        root_sign = mapping["root_direction_sign"]
+        tip_sign = mapping["tip_direction_sign"]
+        root_angle = (
+            _joint_flexion_rad(landmarks[1], landmarks[2], landmarks[3])
+            if root_sign is None
+            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=True) * float(root_sign))
+        )
+        tip_angle = (
+            _joint_flexion_rad(landmarks[2], landmarks[3], landmarks[4])
+            if tip_sign is None
+            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=False) * float(tip_sign))
+        )
         root_amount = _normalized_angle(
             root_angle,
             mapping["root_open_rad"],
             mapping["root_touch_rad"],
             self._thumb_flexion_root_gamma,
+            open_deadband_rad=self._thumb_flexion_open_angle_deadband_rad,
         )
         tip_amount = _normalized_angle(
             tip_angle,
             mapping["tip_open_rad"],
             mapping["tip_touch_rad"],
             self._thumb_flexion_tip_gamma,
+            open_deadband_rad=self._thumb_flexion_open_angle_deadband_rad,
         )
         root_amount = _open_straightness_guard(
             root_amount,
@@ -991,7 +1094,7 @@ class ManusL20RetargetNode(Node):
             landmarks[2],
             landmarks[3],
             landmarks[4],
-            self._flexion_open_straightness_threshold,
+            self._thumb_flexion_open_straightness_threshold,
         )
         tip_amount = _open_straightness_guard(
             tip_amount,
@@ -999,7 +1102,7 @@ class ManusL20RetargetNode(Node):
             landmarks[2],
             landmarks[3],
             landmarks[4],
-            self._flexion_open_straightness_threshold,
+            self._thumb_flexion_open_straightness_threshold,
         )
         command[0] = _lerp_command(mapping["root_open_cmd"], mapping["root_touch_cmd"], root_amount)
         command[15] = _lerp_command(mapping["tip_open_cmd"], mapping["tip_touch_cmd"], tip_amount)
@@ -1141,19 +1244,31 @@ class ManusL20RetargetNode(Node):
         mapping = self._thumb_flexion_mapping
         if mapping is None:
             return None
-        root_angle = _joint_flexion_rad(landmarks[1], landmarks[2], landmarks[3])
-        tip_angle = _joint_flexion_rad(landmarks[2], landmarks[3], landmarks[4])
+        root_sign = mapping["root_direction_sign"]
+        tip_sign = mapping["tip_direction_sign"]
+        root_angle = (
+            _joint_flexion_rad(landmarks[1], landmarks[2], landmarks[3])
+            if root_sign is None
+            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=True) * float(root_sign))
+        )
+        tip_angle = (
+            _joint_flexion_rad(landmarks[2], landmarks[3], landmarks[4])
+            if tip_sign is None
+            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=False) * float(tip_sign))
+        )
         root_amount = _normalized_angle(
             root_angle,
             mapping["root_open_rad"],
             mapping["root_touch_rad"],
             self._thumb_flexion_root_gamma,
+            open_deadband_rad=self._thumb_flexion_open_angle_deadband_rad,
         )
         tip_amount = _normalized_angle(
             tip_angle,
             mapping["tip_open_rad"],
             mapping["tip_touch_rad"],
             self._thumb_flexion_tip_gamma,
+            open_deadband_rad=self._thumb_flexion_open_angle_deadband_rad,
         )
         return max(root_amount, tip_amount)
 

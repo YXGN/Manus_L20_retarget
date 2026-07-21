@@ -117,6 +117,8 @@ manus_raw_nodes_to_mediapipe_landmarks(...)
 
 这里最重要的不是通信，而是“坐标统一”。后续所有角度、向量、IK 都假设 landmarks 已经在统一手部空间里。
 
+右手默认使用 `right_glove_to_right_retarget`。左手默认使用 `left_glove_to_right_retarget`，它的意思不是把左手机械手改成右手机械手，而是把左手 MANUS 坐标做一次轴翻转，让算法看到的几何关系和右手标定时一致。这样四指 yaw 的正负方向、拇指向掌心运动的方向、IK 目标向量方向，都能复用同一套右手 retarget 逻辑。
+
 ## 手掌局部坐标系
 
 文件：`manus_landmarks.py`

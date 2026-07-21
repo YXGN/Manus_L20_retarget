@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import time
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+import yaml
 
 
 STANDARD_OPEN_COMMAND = [
@@ -70,6 +72,57 @@ class G20JointProbe(Node):
         self._pub.publish(msg)
 
 
+def _command_from_yaml(path: str, key: str) -> list[int]:
+    yaml_path = Path(path).expanduser().resolve()
+    with yaml_path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    value = _lookup_yaml_key(data, key)
+    if not isinstance(value, list):
+        raise ValueError(f"{yaml_path}:{key} is not a list")
+    if len(value) != 20:
+        raise ValueError(f"{yaml_path}:{key} must contain 20 values, got {len(value)}")
+    return [max(0, min(255, int(round(float(item))))) for item in value]
+
+
+def _lookup_yaml_key(data: object, key: str) -> object:
+    if not key:
+        raise ValueError("--key is required when using --yaml")
+    if isinstance(data, dict):
+        if key in data:
+            return data[key]
+        command_block = data.get("command")
+        if isinstance(command_block, dict) and key in command_block:
+            return command_block[key]
+    current = data
+    for part in key.split("."):
+        if not isinstance(current, dict) or part not in current:
+            raise KeyError(f"YAML key not found: {key}")
+        current = current[part]
+    return current
+
+
+def run_send_command(parsed: argparse.Namespace) -> None:
+    if parsed.yaml:
+        command = _command_from_yaml(parsed.yaml, parsed.key)
+    else:
+        command = [max(0, min(255, int(value))) for value in parsed.values]
+        if len(command) != 20:
+            raise ValueError(f"--values must contain 20 values, got {len(command)}")
+
+    rclpy.init()
+    node = G20JointProbe(parsed.topic)
+    try:
+        node.get_logger().info(f"publishing L20 command to {parsed.topic}: {command}")
+        for _ in range(max(1, parsed.repeat)):
+            node.publish_command(command)
+            rclpy.spin_once(node, timeout_sec=0.05)
+            time.sleep(max(0.0, parsed.period))
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
 def run_g20_probe(parsed: argparse.Namespace) -> None:
     rclpy.init()
     node = G20JointProbe(parsed.topic)
@@ -113,6 +166,19 @@ def _build_parser() -> argparse.ArgumentParser:
     g20_probe.add_argument("--hold", type=float, default=1.5)
     g20_probe.add_argument("--return-open", action="store_true", default=True)
     g20_probe.set_defaults(func=run_g20_probe)
+
+    send_command = subparsers.add_parser(
+        "send-command",
+        description="Publish one full 20-slot L20/G20 command to the hardware command topic.",
+    )
+    send_command.add_argument("--topic", default="/cb_right_hand_control_cmd")
+    source = send_command.add_mutually_exclusive_group(required=True)
+    source.add_argument("--values", type=int, nargs=20)
+    source.add_argument("--yaml", help="Calibration YAML file containing a 20-value command list.")
+    send_command.add_argument("--key", default="", help="Command key, e.g. open_command or command.open_command.")
+    send_command.add_argument("--repeat", type=int, default=5)
+    send_command.add_argument("--period", type=float, default=0.05)
+    send_command.set_defaults(func=run_send_command)
     return parser
 
 

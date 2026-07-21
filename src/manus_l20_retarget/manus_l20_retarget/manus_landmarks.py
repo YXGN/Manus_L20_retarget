@@ -17,10 +17,9 @@ FINGER_SLOTS = {
 
 TRANSFORMS: dict[str, np.ndarray] = {
     "identity": np.eye(3, dtype=np.float64),
-    # Same transform used by l20_ik_core's PICO adapter. MANUS and PICO are not the
-    # same device, but this is a useful candidate because both are tracking-space
-    # hand skeletons entering a MediaPipe-style retargeting pipeline.
-    "pico_native_to_rh": np.array(
+    # Right MANUS glove coordinates mapped into the canonical right-hand
+    # retargeting space used by the L20 mapping and thumb IK code.
+    "right_glove_to_right_retarget": np.array(
         [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]],
         dtype=np.float64,
     ),
@@ -31,17 +30,13 @@ TRANSFORMS: dict[str, np.ndarray] = {
         [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0]],
         dtype=np.float64,
     ),
-    "manus_y_up_to_rh": np.array(
-        [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]],
-        dtype=np.float64,
-    ),
 }
 
 
 def manus_raw_nodes_to_mediapipe_landmarks(
     raw_nodes: list[ManusRawNode],
     *,
-    transform: str = "pico_native_to_rh",
+    transform: str = "right_glove_to_right_retarget",
     wrist_mode: str = "estimate",
     distal_mode: str = "dip",
 ) -> np.ndarray:
