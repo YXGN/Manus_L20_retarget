@@ -36,7 +36,6 @@ from .manus_l20_retarget_node import (
     _default_workspace_root,
     _float_list_parameter,
     _frame_rotation_from_two_vectors,
-    _joint_flexion_rad,
     _lerp_command,
     _manus_thumb_local_point_at,
     _normalized_angle,
@@ -48,6 +47,7 @@ from .manus_l20_retarget_node import (
     _unit_vector,
 )
 from .mapping import clamp_u8
+from .retarget_pipeline import _directed_finger_flexion_rad, _joint_flexion_rad
 
 
 IDENTITY_MAT = np.eye(3, dtype=np.float64).reshape(-1)
@@ -69,6 +69,8 @@ class L20SimulationNode(Node):
         self._root_closed_rad = list(DEFAULT_ROOT_CLOSED_RAD)
         self._tip_open_rad = list(DEFAULT_TIP_OPEN_RAD)
         self._tip_closed_rad = list(DEFAULT_TIP_CLOSED_RAD)
+        self._root_flexion_direction_sign: list[float] | None = None
+        self._tip_flexion_direction_sign: list[float] | None = None
         self._finger_yaw_source = str(args.finger_yaw_source)
         self._finger_yaw_open_rad = list(DEFAULT_FINGER_YAW_OPEN_RAD)
         self._finger_yaw_mapping: dict[str, Any] | None = None
@@ -136,6 +138,27 @@ class L20SimulationNode(Node):
             data.get("tip_flexion_closed_rad"),
             self._tip_closed_rad,
             length=5,
+        )
+        samples = data.get("samples")
+        open_sample = samples.get("open") if isinstance(samples, dict) else None
+        fist_sample = samples.get("four_finger_fist") if isinstance(samples, dict) else None
+        has_signed_samples = (
+            isinstance(open_sample, dict)
+            and isinstance(fist_sample, dict)
+            and "root_signed_rad" in open_sample
+            and "root_signed_rad" in fist_sample
+            and "tip_signed_rad" in open_sample
+            and "tip_signed_rad" in fist_sample
+        )
+        self._root_flexion_direction_sign = (
+            _float_list_parameter(data.get("root_flexion_direction_sign"), [1.0] * 5, length=5)
+            if has_signed_samples and data.get("root_flexion_direction_sign") is not None
+            else None
+        )
+        self._tip_flexion_direction_sign = (
+            _float_list_parameter(data.get("tip_flexion_direction_sign"), [1.0] * 5, length=5)
+            if has_signed_samples and data.get("tip_flexion_direction_sign") is not None
+            else None
         )
 
         command_data = data.get("command")
@@ -255,6 +278,16 @@ class L20SimulationNode(Node):
                 "root_touch_rad": float(touch_sample["root_rad"]),
                 "tip_open_rad": float(open_sample["tip_rad"]),
                 "tip_touch_rad": float(touch_sample["tip_rad"]),
+                "root_direction_sign": (
+                    float(data["root_flexion_direction_sign"])
+                    if data.get("root_flexion_direction_sign") is not None
+                    else None
+                ),
+                "tip_direction_sign": (
+                    float(data["tip_flexion_direction_sign"])
+                    if data.get("tip_flexion_direction_sign") is not None
+                    else None
+                ),
                 "root_open_cmd": int(open_command[0]),
                 "root_touch_cmd": int(touch_command[0]),
                 "tip_open_cmd": int(open_command[15]),
@@ -521,8 +554,18 @@ class L20SimulationNode(Node):
         if mapping is None:
             return command
 
-        root_angle = _joint_flexion_rad(landmarks[1], landmarks[2], landmarks[3])
-        tip_angle = _joint_flexion_rad(landmarks[2], landmarks[3], landmarks[4])
+        root_sign = mapping["root_direction_sign"]
+        tip_sign = mapping["tip_direction_sign"]
+        root_angle = (
+            _joint_flexion_rad(landmarks[1], landmarks[2], landmarks[3])
+            if root_sign is None
+            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=True) * float(root_sign))
+        )
+        tip_angle = (
+            _joint_flexion_rad(landmarks[2], landmarks[3], landmarks[4])
+            if tip_sign is None
+            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=False) * float(tip_sign))
+        )
         root_amount = _normalized_angle(
             root_angle,
             float(mapping["root_open_rad"]),
@@ -543,8 +586,22 @@ class L20SimulationNode(Node):
         for finger_index, (mcp, pip, dip, tip) in enumerate(FINGER_LANDMARKS):
             if finger_index == 0:
                 continue
-            root_angle = _joint_flexion_rad(landmarks[mcp], landmarks[pip], landmarks[dip])
-            tip_angle = _joint_flexion_rad(landmarks[pip], landmarks[dip], landmarks[tip])
+            if self._root_flexion_direction_sign is None:
+                root_angle = _joint_flexion_rad(landmarks[mcp], landmarks[pip], landmarks[dip])
+            else:
+                root_angle = max(
+                    0.0,
+                    _directed_finger_flexion_rad(landmarks, finger_index, root=True)
+                    * float(self._root_flexion_direction_sign[finger_index]),
+                )
+            if self._tip_flexion_direction_sign is None:
+                tip_angle = _joint_flexion_rad(landmarks[pip], landmarks[dip], landmarks[tip])
+            else:
+                tip_angle = max(
+                    0.0,
+                    _directed_finger_flexion_rad(landmarks, finger_index, root=False)
+                    * float(self._tip_flexion_direction_sign[finger_index]),
+                )
             root_amount = _normalized_angle(
                 root_angle,
                 self._root_open_rad[finger_index],
@@ -735,7 +792,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--topic", default="/manus_glove_0")
     parser.add_argument("--interval", type=float, default=0.5)
     parser.add_argument("--mode", choices=("segment",), default="segment", help=argparse.SUPPRESS)
-    parser.add_argument("--transform", default="pico_native_to_rh")
+    parser.add_argument("--transform", default="right_glove_to_right_retarget")
     parser.add_argument("--wrist-mode", default="estimate", choices=("estimate", "palm_center"))
     parser.add_argument("--distal-mode", default="dip", choices=("dip", "ip"))
     parser.add_argument("--l20-thumb-ik-root", default=str(thumb_ik_root))
@@ -764,7 +821,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--segment-open-calibration-sec", type=float, default=1.0)
     parser.add_argument("--segment-frame-path", default=str(retarget_config / "thumb_segment_frame_right.yaml"))
     parser.add_argument("--segment-manus-open-vector", default="")
-    parser.add_argument("--segment-manus-open-vector-path", default=str(retarget_config / "thumb_segment_open_vector_right.yaml"))
+    parser.add_argument("--segment-manus-open-vector-path", default="")
     parser.add_argument("--segment-scale", type=float, default=1.0)
     parser.add_argument("--segment-damping", type=float, default=8e-4)
     parser.add_argument("--segment-max-step", type=float, default=0.20)

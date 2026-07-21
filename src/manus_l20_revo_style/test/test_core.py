@@ -47,6 +47,36 @@ def test_spread_uses_middle_relative_reference():
     assert command_a[6] != command_b[6]
 
 
+def test_spread_gate_suppresses_yaw_when_finger_is_flexed():
+    cfg = _config()
+    retarget = RevoStyleL20Retarget(cfg)
+    _, open_flex_command = retarget.retarget(
+        {"MiddleSpread": 0.0, "IndexSpread": 20.0, "IndexMCPStretch": 0.0},
+        smooth=False,
+    )
+    _, closed_flex_command = retarget.retarget(
+        {"MiddleSpread": 0.0, "IndexSpread": 20.0, "IndexMCPStretch": 85.0},
+        smooth=False,
+    )
+    assert open_flex_command[6] != cfg["l20_command"]["open_command"][6]
+    assert closed_flex_command[6] == cfg["l20_command"]["open_command"][6]
+
+
+def test_full_manus_sdk_ergonomics_keys_are_canonicalized():
+    retarget = RevoStyleL20Retarget(_config())
+    _, command = retarget.retarget(
+        {
+            "RightFingerIndexMCPStretch": 85.0,
+            "RightFingerIndexPIPStretch": 75.0,
+            "RightFingerIndexMCPSpread": 20.0,
+            "RightFingerMiddleMCPSpread": 0.0,
+        },
+        smooth=False,
+    )
+    assert command[1] == _config()["l20_command"]["closed_command"][1]
+    assert command[16] == _config()["l20_command"]["closed_command"][16]
+
+
 def test_direct_ergonomics_range_maps_four_finger_tip():
     cfg = _config()
     retarget = RevoStyleL20Retarget(cfg)

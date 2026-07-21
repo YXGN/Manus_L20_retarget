@@ -320,12 +320,12 @@ ExecuteProcess(
 
 ```python
 retarget_type = "right"
-landmark_transform_default = "left_glove_to_right_retarget" if logic_type == "left" else "pico_native_to_rh"
+landmark_transform_default = "left_glove_to_right_retarget" if logic_type == "left" else "right_glove_to_right_retarget"
 ```
 
 - 当前左手运行时刻意复用右手重定向逻辑。
-- 左手 MANUS 数据会通过 `left_glove_to_right_retarget` 镜像到右手 canonical 几何空间。
-- 这样左右手最终都走一套已验证的 L20 命令语义。
+- 左手 MANUS 数据会通过 `left_glove_to_right_retarget` 做坐标轴翻转：让左手的手指外展、拇指方向等几何关系，在算法看来像右手 canonical 几何。
+- 这样不是把左手硬件当成右手硬件，而是复用已验证的右手角度特征、标定和拇指 IK 公式。
 
 `DeclareLaunchArgument(...)` 表示声明一个可从命令行覆盖的参数。例如：
 
@@ -696,9 +696,8 @@ JOINT_ORDER = ("MCP", "PIP", "IP", "DIP", "TIP")
 `TRANSFORMS` 是坐标系转换矩阵：
 
 - `identity`: 不变。
-- `pico_native_to_rh`: 当前右手默认 canonical 转换。
-- `left_glove_to_right_retarget`: 左手镜像到右手 retarget 空间。
-- `manus_y_up_to_rh`: 另一个候选 MANUS 坐标转换。
+- `right_glove_to_right_retarget`: 当前右手默认 canonical 转换。
+- `left_glove_to_right_retarget`: 左手坐标轴翻转到右手 retarget 算法使用的 canonical 几何空间。
 
 `manus_raw_nodes_to_mediapipe_landmarks(...)` 主流程：
 

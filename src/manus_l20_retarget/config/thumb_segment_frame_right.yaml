@@ -1,65 +1,53 @@
 schema: manus_l20.thumb_segment_frame.v1
-# Right thumb segment IK two-pose frame calibration.
-#
-# This file aligns the MANUS thumb segment vector to the L20 thumb IK model
-# using two poses:
-#   open  -> natural thumb-open pose
-#   touch -> thumb touching the pinky-root pose
-#
-# The runtime uses manus_open_vector and manus_touch_vector to build a stable
-# MANUS thumb motion plane. It uses robot_open_command and robot_touch_command
-# to build the corresponding L20 thumb motion plane.
 segment_start: 2
 segment_end: 3
-# MANUS thumb segment indexes used for IK target vector:
-#   segment_start=2 and segment_end=3 mean landmarks[2] -> landmarks[3].
 manus_open_vector:
-- -0.018419
-- 0.020205
-- 0.012332
+- -0.021276
+- 0.027589
+- 0.009462
 manus_touch_vector:
-- 0.007033
-- 0.024984
-- 0.01503
+- 0.01953
+- 0.028798
+- 0.009591
 robot_open_command:
-- 254  # 0  Thumb Base
-- 248  # 1  Index Base
-- 246  # 2  Middle Base
-- 249  # 3  Ring Base
-- 254  # 4  Pinky Base
-- 128  # 5  Thumb Roll
-- 115  # 6  Index Yaw
-- 111  # 7  Middle Yaw
-- 131  # 8  Ring Yaw
-- 188  # 9  Pinky Yaw
-- 221  # 10  Thumb Yaw
-- 255  # 11  Reserved
-- 255  # 12  Reserved
-- 255  # 13  Reserved
-- 255  # 14  Reserved
-- 254  # 15  Thumb Tip
-- 254  # 16  Index Tip
-- 254  # 17  Middle Tip
-- 254  # 18  Ring Tip
-- 254  # 19  Pinky Tip
+- 254
+- 248
+- 246
+- 249
+- 254
+- 128
+- 115
+- 111
+- 131
+- 188
+- 221
+- 255
+- 255
+- 255
+- 255
+- 254
+- 254
+- 254
+- 254
+- 254
 robot_touch_command:
-- 254  # 0  Thumb Base
-- 248  # 1  Index Base
-- 246  # 2  Middle Base
-- 249  # 3  Ring Base
-- 254  # 4  Pinky Base
-- 128  # 5  Thumb Roll
-- 115  # 6  Index Yaw
-- 111  # 7  Middle Yaw
-- 131  # 8  Ring Yaw
-- 188  # 9  Pinky Yaw
-- 221  # 10  Thumb Yaw
-- 255  # 11  Reserved
-- 255  # 12  Reserved
-- 255  # 13  Reserved
-- 255  # 14  Reserved
-- 254  # 15  Thumb Tip
-- 254  # 16  Index Tip
-- 254  # 17  Middle Tip
-- 254  # 18  Ring Tip
-- 254  # 19  Pinky Tip
+- 60
+- 255
+- 255
+- 255
+- 255
+- 0
+- 163
+- 129
+- 86
+- 62
+- 100
+- 255
+- 255
+- 255
+- 255
+- 60
+- 255
+- 255
+- 255
+- 255

@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 from manus_ros2_msgs.msg import ManusGlove
 
-from .manus_landmarks import manus_raw_nodes_to_mediapipe_landmarks
+from .manus_landmarks import _palm_frame, manus_raw_nodes_to_mediapipe_landmarks
 from .mapping import clamp_u8
 
 
@@ -132,27 +132,44 @@ def compute_landmark_flexion_targets(
     root_closed_rad: list[float],
     tip_open_rad: list[float],
     tip_closed_rad: list[float],
+    root_direction_sign: list[float] | None = None,
+    tip_direction_sign: list[float] | None = None,
     root_gamma: float,
     tip_gamma: float,
     open_straightness_threshold: float,
+    open_angle_deadband_rad: float = 0.0,
 ) -> HandRetargetTargets:
     finger_targets: dict[int, FingerFlexionTarget] = {}
     for finger_index, (mcp, pip, dip, tip) in enumerate(FINGER_LANDMARKS):
         if finger_index == 0:
             continue
-        root_angle = _joint_flexion_rad(landmarks[mcp], landmarks[pip], landmarks[dip])
-        tip_angle = _joint_flexion_rad(landmarks[pip], landmarks[dip], landmarks[tip])
+        if root_direction_sign is None:
+            root_angle = _joint_flexion_rad(landmarks[mcp], landmarks[pip], landmarks[dip])
+        else:
+            root_angle = _directed_finger_flexion_rad(landmarks, finger_index, root=True) * float(
+                root_direction_sign[finger_index]
+            )
+            root_angle = max(0.0, root_angle)
+        if tip_direction_sign is None:
+            tip_angle = _joint_flexion_rad(landmarks[pip], landmarks[dip], landmarks[tip])
+        else:
+            tip_angle = _directed_finger_flexion_rad(landmarks, finger_index, root=False) * float(
+                tip_direction_sign[finger_index]
+            )
+            tip_angle = max(0.0, tip_angle)
         root_amount = _normalized_angle(
             root_angle,
             root_open_rad[finger_index],
             root_closed_rad[finger_index],
             root_gamma,
+            open_deadband_rad=open_angle_deadband_rad,
         )
         tip_amount = _normalized_angle(
             tip_angle,
             tip_open_rad[finger_index],
             tip_closed_rad[finger_index],
             tip_gamma,
+            open_deadband_rad=open_angle_deadband_rad,
         )
         root_amount = _open_straightness_guard(
             root_amount,
@@ -214,9 +231,51 @@ def _joint_flexion_rad(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
     return math.pi - interior_angle
 
 
-def _normalized_angle(angle: float, open_angle: float, closed_angle: float, gamma: float) -> float:
-    span = max(1e-6, float(closed_angle) - float(open_angle))
-    amount = max(0.0, min(1.0, (float(angle) - float(open_angle)) / span))
+def _directed_finger_flexion_rad(landmarks: np.ndarray, finger_index: int, *, root: bool) -> float:
+    mcp, pip, dip, tip = FINGER_LANDMARKS[finger_index]
+    if root:
+        a, b, c = landmarks[mcp], landmarks[pip], landmarks[dip]
+    else:
+        a, b, c = landmarks[pip], landmarks[dip], landmarks[tip]
+    frame = _palm_frame(landmarks)
+    if frame is None:
+        return _joint_flexion_rad(a, b, c)
+    lateral, _forward, normal = frame
+    reference_axis = normal if finger_index == 0 else lateral
+    return _signed_joint_flexion_rad(a, b, c, reference_axis)
+
+
+def _signed_joint_flexion_rad(
+    a: np.ndarray,
+    b: np.ndarray,
+    c: np.ndarray,
+    reference_axis: np.ndarray,
+) -> float:
+    unsigned = _joint_flexion_rad(a, b, c)
+    first = np.asarray(a, dtype=np.float64) - np.asarray(b, dtype=np.float64)
+    second = np.asarray(c, dtype=np.float64) - np.asarray(b, dtype=np.float64)
+    bend_axis = np.cross(first, second)
+    axis_norm = float(np.linalg.norm(bend_axis))
+    ref_norm = float(np.linalg.norm(reference_axis))
+    if axis_norm <= 1e-8 or ref_norm <= 1e-8:
+        return unsigned
+    sign = 1.0 if float(np.dot(bend_axis / axis_norm, reference_axis / ref_norm)) >= 0.0 else -1.0
+    return sign * unsigned
+
+
+def _normalized_angle(
+    angle: float,
+    open_angle: float,
+    closed_angle: float,
+    gamma: float,
+    *,
+    open_deadband_rad: float = 0.0,
+) -> float:
+    open_value = float(open_angle)
+    if float(angle) <= open_value + max(0.0, float(open_deadband_rad)):
+        return 0.0
+    span = max(1e-6, float(closed_angle) - open_value)
+    amount = max(0.0, min(1.0, (float(angle) - open_value) / span))
     return amount ** gamma
 
 

@@ -48,6 +48,11 @@ spread:
   pinky_scale: 1.0
   ring_forward_scale: 1.0
   ring_backward_scale: 1.0
+  # When the finger is deeply flexed, blend lateral spread slots back toward
+  # the open command. This keeps L20 yaw/spread from firing because of curl.
+  flexion_gate_start: 0.50
+  flexion_gate_end: 0.95
+  flexion_gate_source: root
 
 thumb:
   # Simple Revo-style ergonomics mapping for L20. The existing landmark segment

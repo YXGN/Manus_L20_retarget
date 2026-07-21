@@ -114,12 +114,111 @@ ros2 topic hz /manus_glove_1
 
 检查完成后，在运行 `manus_data_publisher` 的终端按 `Ctrl+C` 退出。
 
-## 5. 启动双手遥操作
+## 5. 采集人手到 L20 映射数据
+
+这一节采的是我们自己的 retarget 标定 YAML，不是 MANUS 官方 `.mcal`。
+
+两者区别：
+
+- 第 3 节 `.mcal`：MANUS 手套自己的标定文件，让手套输出更准。
+- 本节 YAML：把 MANUS 人手动作映射到 L20 的 20 路控制命令。
+
+如果只是日常启动，不需要每次都采。以下情况建议重采：
+
+- 换操作者。
+- 重新佩戴手套后动作明显变差。
+- 修改了 `landmark_transform`、拇指 IK 策略或左右手逻辑。
+- 想重新校准四指弯曲、四指 yaw、拇指弯曲或拇指 IK 平面。
+
+先启动 MANUS 数据发布器。新开一个终端：
+
+```bash
+source /opt/ros/humble/setup.bash
+cd /home/huangzizhe/Manus_L20_retarget
+source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
+
+ros2 run manus_ros2 manus_data_publisher --ros-args \
+  -p load_calibration:=true \
+  -p left_calibration_path:=/home/huangzizhe/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_left.mcal \
+  -p right_calibration_path:=/home/huangzizhe/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_right.mcal
+```
+
+保持这个终端运行，再开另一个终端采集 retarget YAML。
+
+### 推荐：一键合并采集
+
+现在推荐使用 `calibration_capture all`。它把重复姿态融合后，只需要采 5 次姿势，同时生成四类 YAML：
+
+- `flexion_right/left_calibration.yaml`: 四指 root/tip 弯曲。
+- `finger_yaw_right/left_calibration.yaml`: 四指 yaw。
+- `thumb_right/left_flexion_mapping.yaml`: 拇指 root/tip 弯曲。
+- `thumb_segment_frame_right/left.yaml`: 拇指 segment IK 双姿态 frame。
+
+5 个姿势含义：
+
+- `natural_open`: 自然张开，同时作为四指 open、四指 yaw open、拇指弯曲 open、拇指 IK open。
+- `four_finger_fist`: 四指完全弯曲握拳，只用于四指弯曲 closed。
+- `finger_close`: 四指并拢，只用于四指 yaw close。
+- `finger_spread`: 四指外展，只用于四指 yaw spread。
+- `thumb_pinky_root_touch`: 大拇指触碰小拇指指根，同时用于拇指弯曲 touch、拇指 IK touch。
+
+右手一键采集：
+
+```bash
+source /opt/ros/humble/setup.bash
+cd /home/huangzizhe/Manus_L20_retarget
+source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
+
+ros2 run manus_l20_retarget calibration_capture all \
+  --hand right \
+  --glove-topic /manus_glove_0 \
+  --duration 2.0
+```
+
+左手一键采集。如果左手手套发布在 `/manus_glove_1`，使用下面命令；如果当前只有一只左手手套并发布在 `/manus_glove_0`，把 `/manus_glove_1` 改成 `/manus_glove_0`：
+
+```bash
+ros2 run manus_l20_retarget calibration_capture all \
+  --hand left \
+  --glove-topic /manus_glove_1 \
+  --duration 2.0
+```
+
+注意：
+
+- 采集命令会覆盖对应 YAML 里的 MANUS 标定数据。
+- `thumb_segment_frame_*.yaml` 里的 L20 `robot_open_command` / `robot_touch_command` 会优先保留已有文件里的值，不会因为重新采 MANUS 手势就覆盖手动调好的 L20 参考姿态。
+- `--hand left` 默认会使用 `left_glove_to_right_retarget`；右手默认使用 `right_glove_to_right_retarget`。
+- 采集时不需要启动 L20 真机，只需要 MANUS 数据话题正常发布。
+
+### 分项补采
+
+如果只想补采某一项，旧的分项命令仍然保留：
+
+- `calibration_capture flexion`: 只采四指弯曲 open/fist。
+- `calibration_capture finger-yaw`: 只采四指 yaw open/close/spread。
+- `calibration_capture thumb-flexion`: 只采拇指弯曲 open/touch。
+- `calibration_capture thumb-frame`: 只采拇指 IK open/touch frame。
+
+```bash
+ros2 run manus_l20_retarget calibration_capture --help
+```
+
+采集完成后确认 YAML 文件存在：
+
+```bash
+ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/*_calibration.yaml
+ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/thumb_*_flexion_mapping.yaml
+ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/thumb_segment_frame_*.yaml
+```
+
+## 6. 启动双手遥操作
 
 确认已完成：
 
 - 手套已标定。
 - `Calibration_left.mcal` 和 `Calibration_right.mcal` 已存在。
+- 人手到 L20 映射 YAML 已存在。
 - `can0` 和 `can1` 已连接并 up。
 - 机械手周围安全。
 
@@ -146,7 +245,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
 - `/manus_glove_0`、`/manus_glove_1` 有数据。
 - LinkerHand driver 正常连接 `can0`、`can1`。
 
-## 6. 常用检查命令
+## 7. 常用检查命令
 
 查看 MANUS 数据：
 
@@ -179,7 +278,7 @@ ros2 node list
 ros2 topic list | grep -E "manus|cb_"
 ```
 
-## 7. 常见问题
+## 8. 常见问题
 
 ### 找不到 GLFW/glfw3.h
 
@@ -233,7 +332,7 @@ lsusb
 
 如果设备名不是 `can0` / `can1`，按实际名称修改 `right_can` 和 `left_can`。
 
-## 8. 停止流程
+## 9. 停止流程
 
 1. 先松开手套动作，保持机械手在安全姿态。
 2. 在遥操作 launch 终端按 `Ctrl+C`。

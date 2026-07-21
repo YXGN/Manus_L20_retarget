@@ -110,6 +110,21 @@ Edit `config/revo_style_l20_right.yaml`.
 - `l20_command`: conversion from intermediate joint angles to L20 slots.
 - `smoothing`: low-pass and per-cycle command delta limits.
 
+Incoming MANUS ergonomics keys are normalized before retargeting, so both
+`IndexPIPStretch` and SDK-style names such as `RightFingerIndexPIPStretch` are
+accepted. Four-finger spread slots also support a flexion gate:
+
+```yaml
+spread:
+  flexion_gate_start: 0.50
+  flexion_gate_end: 0.95
+  flexion_gate_source: root  # root, tip, or max
+```
+
+When the selected finger flexion amount moves through that range, the
+corresponding L20 spread slot is blended back toward the configured open
+command. This reduces lateral yaw/spread artifacts while the finger is curling.
+
 For four-finger root/tip, `l20_command.direct_ergonomics_mapping` maps MANUS
 ergonomics ranges directly to L20 bytes:
 

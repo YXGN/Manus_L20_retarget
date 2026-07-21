@@ -1,58 +1,58 @@
 schema: manus_l20.thumb_flexion_mapping.v1
 finger: thumb
-# Left thumb root/tip flexion mapping.
-#
+root_flexion_direction_sign: 1.0
+tip_flexion_direction_sign: 1.0
 command:
   thumb_natural_open_command:
-  - 150  # 0  Thumb Base
-  - 255  # 1  Index Base
-  - 255  # 2  Middle Base
-  - 255  # 3  Ring Base
-  - 255  # 4  Pinky Base
-  - 110  # 5  Thumb Roll
-  - 163  # 6  Index Yaw
-  - 129  # 7  Middle Yaw
-  - 86   # 8  Ring Yaw
-  - 62   # 9  Pinky Yaw
-  - 255  # 10  Thumb Yaw
-  - 255  # 11  Reserved
-  - 255  # 12  Reserved
-  - 255  # 13  Reserved
-  - 255  # 14  Reserved
-  - 255  # 15  Thumb Tip
-  - 255  # 16  Index Tip
-  - 255  # 17  Middle Tip
-  - 255  # 18  Ring Tip
-  - 255  # 19  Pinky Tip
+  - 160
+  - 255
+  - 255
+  - 255
+  - 255
+  - 150
+  - 163
+  - 129
+  - 86
+  - 62
+  - 255
+  - 255
+  - 255
+  - 255
+  - 255
+  - 220
+  - 255
+  - 255
+  - 255
+  - 255
   thumb_pinky_root_touch_command:
-  - 60   # 0  Thumb Base
-  - 255  # 1  Index Base
-  - 255  # 2  Middle Base
-  - 255  # 3  Ring Base
-  - 255  # 4  Pinky Base
-  - 0    # 5  Thumb Roll
-  - 163  # 6  Index Yaw
-  - 129  # 7  Middle Yaw
-  - 86   # 8  Ring Yaw
-  - 62   # 9  Pinky Yaw
-  - 222  # 10  Thumb Yaw
-  - 255  # 11  Reserved
-  - 255  # 12  Reserved
-  - 255  # 13  Reserved
-  - 255  # 14  Reserved
-  - 30   # 15  Thumb Tip
-  - 220  # 16  Index Tip
-  - 255  # 17  Middle Tip
-  - 255  # 18  Ring Tip
-  - 255  # 19  Pinky Tip
+  - 60
+  - 255
+  - 255
+  - 255
+  - 255
+  - 0
+  - 163
+  - 129
+  - 86
+  - 62
+  - 100
+  - 255
+  - 255
+  - 255
+  - 255
+  - 60
+  - 255
+  - 255
+  - 255
+  - 255
 samples:
-  # MANUS measured thumb flexion at the touch pose.
-  # root_rad = angle at landmarks[1]-[2]-[3] (thumb root)
-  # tip_rad  = angle at landmarks[2]-[3]-[4] (thumb tip)
   thumb_pinky_root_touch:
-    root_rad: 0.056877
-    tip_rad: 1.348886
-  # MANUS measured thumb flexion at the natural-open pose.
+    root_rad: 0.778141
+    tip_rad: 0.94648
+    root_signed_rad: 0.778141
+    tip_signed_rad: 0.94648
   thumb_natural_open:
-    root_rad: 0.00261
-    tip_rad: 0.054354
+    root_rad: 0.003558
+    tip_rad: 0.0
+    root_signed_rad: 0.003558
+    tip_signed_rad: -0.459833
