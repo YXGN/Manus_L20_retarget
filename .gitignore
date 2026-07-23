@@ -14,6 +14,9 @@ src/manus_ros2/calibration/*.mcal
 src/manus_ros2/calibration/*.bak
 **/CalibrationGUI/CalibrationGUI.out
 **/CalibrationGUI/objects/
+**/.specstory/
+**/.cursorindexingignore
+**/third_party/imgui/.git/
 
 ROS2/build/
 ROS2/install/
