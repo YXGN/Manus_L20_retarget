@@ -57,7 +57,7 @@ ip -details link show can1
 进入标定工具目录：
 
 ```bash
-cd /home/huangzizhe/Manus_L20_retarget/src/sharpa-manus-sdk-main/client/CalibrationGUI
+cd /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/third_party/sharpa-manus-sdk/client/CalibrationGUI
 ./build.sh
 ./CalibrationGUI.out
 ```

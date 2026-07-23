@@ -29,7 +29,7 @@ src/manus_ros2/calibration/Calibration_right.mcal
 To create or refresh these files, build and run the Sharpa calibration GUI:
 
 ```bash
-cd src/sharpa-manus-sdk-main/client/CalibrationGUI
+cd src/manus_l20_retarget/third_party/sharpa-manus-sdk/client/CalibrationGUI
 ./build.sh
 ./CalibrationGUI.out
 ```

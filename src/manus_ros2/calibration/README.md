@@ -6,7 +6,7 @@ Place MANUS glove calibration files here:
 These files are produced by:
 
 ```bash
-cd src/sharpa-manus-sdk-main/client/CalibrationGUI
+cd src/manus_l20_retarget/third_party/sharpa-manus-sdk/client/CalibrationGUI
 ./build.sh
 ./CalibrationGUI.out
 ```

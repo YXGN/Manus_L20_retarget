@@ -331,6 +331,20 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | `lib/libManusSDK.so` | MANUS SDK 动态库。 |
 | `lib/libManusSDK_Integrated.so` | MANUS SDK 集成动态库。 |
 
+## `src/manus_l20_retarget/third_party/sharpa-manus-sdk`
+
+这是随 `manus_l20_retarget` 归档的 Sharpa MANUS 工具包，用于保留 MANUS 标定 GUI、Sharpa 参考客户端、Wave retargeting 参考代码和相关 vendor 资源。把它放到 `manus_l20_retarget/third_party` 后，上传 Git 时不会再依赖工作区根目录下单独散落的 `src/sharpa-manus-sdk-main`。
+
+注意：在线 ROS2 发布器 `manus_ros2` 仍然使用 `src/ManusSDK` 下的 MANUS SDK 头文件和动态库；这里的 Sharpa vendor 包主要用于标定 GUI 和参考代码归档，不替代 `src/ManusSDK`。
+
+| 文件或目录 | 作用 |
+| --- | --- |
+| `client/CalibrationGUI` | MANUS 手套 `.mcal` 标定 GUI。SOP 中的手套标定命令使用这个目录。 |
+| `client/include` | Sharpa MANUS 客户端引用的 MANUS SDK 头文件副本。 |
+| `client/*.mcal` | Sharpa 客户端保留的左右手标定文件示例或本地结果。 |
+| `retargeting_alg_release_V4.0` | Sharpa Wave retargeting 参考实现和资源。当前 MANUS -> L20 主链路不直接依赖它。 |
+| `README.md` / `NOTICE.txt` / `License` | vendor 包原始说明和许可证信息。 |
+
 ## 现在应该维护的主文件
 
 日常算法和真机效果调整，优先看这些文件：
@@ -352,6 +366,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | 路径 | 原因 |
 | --- | --- |
 | `src/ManusSDK` | 官方 MANUS 二进制 SDK。 |
+| `src/manus_l20_retarget/third_party/sharpa-manus-sdk` | vendor 工具和参考实现，除路径整理和必要补丁外不要随意改算法内容。 |
 | `src/linker_hand_ros2_sdk/linker_hand_ros2_sdk/LinkerHand/core` | 厂商底层通信协议。 |
 | `src/manus_ros2_msgs/msg/*.msg` | 改 message 会触发接口兼容问题。 |
 | `build/`、`install/`、`log/` | 生成目录，不提交、不人工维护。 |
