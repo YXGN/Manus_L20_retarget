@@ -333,7 +333,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 
 ## `src/manus_l20_retarget/third_party/sharpa-manus-sdk`
 
-这是随 `manus_l20_retarget` 归档的 Sharpa MANUS 工具包，用于保留 MANUS 标定 GUI、Sharpa 参考客户端、Wave retargeting 参考代码和相关 vendor 资源。把它放到 `manus_l20_retarget/third_party` 后，上传 Git 时不会再依赖工作区根目录下单独散落的 `src/sharpa-manus-sdk-main`。
+这是本机可选放置的 Sharpa MANUS 工具包，用于保留 MANUS 标定 GUI、Sharpa 参考客户端、Wave retargeting 参考代码和相关 vendor 资源。该目录体量较大，并可能包含本地 `.mcal` 标定结果，因此默认不提交到 Git。
 
 注意：在线 ROS2 发布器 `manus_ros2` 仍然使用 `src/ManusSDK` 下的 MANUS SDK 头文件和动态库；这里的 Sharpa vendor 包主要用于标定 GUI 和参考代码归档，不替代 `src/ManusSDK`。
 
@@ -366,7 +366,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | 路径 | 原因 |
 | --- | --- |
 | `src/ManusSDK` | 官方 MANUS 二进制 SDK。 |
-| `src/manus_l20_retarget/third_party/sharpa-manus-sdk` | vendor 工具和参考实现，除路径整理和必要补丁外不要随意改算法内容。 |
+| `src/manus_l20_retarget/third_party/sharpa-manus-sdk` | 本地 vendor 工具和参考实现，默认不提交到 Git；除路径整理和必要补丁外不要随意改算法内容。 |
 | `src/linker_hand_ros2_sdk/linker_hand_ros2_sdk/LinkerHand/core` | 厂商底层通信协议。 |
 | `src/manus_ros2_msgs/msg/*.msg` | 改 message 会触发接口兼容问题。 |
 | `build/`、`install/`、`log/` | 生成目录，不提交、不人工维护。 |

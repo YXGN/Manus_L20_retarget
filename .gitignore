@@ -10,6 +10,7 @@ src/ManusSDK/sharpa-manus-sdk-main/
 src/sharpa-manus-sdk-main/
 src/Revo-Retargeting-main/
 src/manus-linkerhand-bridge-feat-init/
+src/manus_l20_retarget/third_party/
 src/manus_ros2/calibration/*.mcal
 src/manus_ros2/calibration/*.bak
 **/CalibrationGUI/CalibrationGUI.out

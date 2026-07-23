@@ -10,7 +10,7 @@ Manus_L20_retarget/
     ManusSDK/                 # MANUS SDK headers/libs
     manus_ros2_msgs/          # MANUS ROS2 messages
     manus_ros2/               # C++ MANUS publisher
-    manus_l20_retarget/       # MANUS -> L20 command retarget; includes bundled third_party Sharpa MANUS tools
+    manus_l20_retarget/       # MANUS -> L20 command retarget; may use local third_party Sharpa MANUS tools
     manus_l20_haptics/        # optional L20 tactile -> MANUS vibration feedback
     manus_l20_revo_style/     # experimental Revo-style MANUS -> L20 path
     linker_hand_ros2_sdk/     # LinkerHand G20 executable used for L20 hardware
