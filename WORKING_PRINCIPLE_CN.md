@@ -274,9 +274,7 @@ straightness >= threshold
 
 主代码：`_apply_finger_yaw`
 
-它有两种模式。
-
-第一种是标定映射模式，也就是现在 launch 默认开启的：
+当前只保留 MANUS ergonomics 标定映射模式，也就是 launch 默认开启的：
 
 ```python
 enable_finger_yaw_mapping = true
@@ -285,8 +283,8 @@ enable_finger_yaw_mapping = true
 对应配置：
 
 ```text
-src/manus_l20_retarget/config/finger_yaw_right_calibration.yaml
-src/manus_l20_retarget/config/finger_yaw_left_calibration.yaml
+src/manus_l20_retarget/config/finger_yaw_ergonomics_right_calibration.yaml
+src/manus_l20_retarget/config/finger_yaw_ergonomics_left_calibration.yaml
 ```
 
 配置里记录三种姿态：
@@ -297,10 +295,10 @@ src/manus_l20_retarget/config/finger_yaw_left_calibration.yaml
 
 每种姿态都有：
 
-- MANUS yaw 特征值 `yaw_rad`。
+- MANUS ergonomics 侧摆特征值 `yaw_rad`。
 - 对应 L20 命令数组。
 
-运行时对每根手指算当前 yaw，然后分别看它更像 close 还是 spread：
+运行时从 MANUS ergonomics 中读取四根手指的侧摆键，然后分别看它更像 close 还是 spread：
 
 ```python
 close_amount = _normalized_signed_segment(angle, open_rad, close_rad)
@@ -325,55 +323,24 @@ command[slot] = lerp(open_cmd, spread_cmd, spread_amount)
 spread_cmd <- open_cmd -> close_cmd
 ```
 
-第二种是非标定模式：
-
-```python
-delta = finger_yaw_command_gain * (angle - finger_yaw_open_rad)
-command[slot] = neutral + delta
-```
-
-这只是用一个增益直接把角度差换成命令差，调起来不如标定映射稳定。
-
 ## yaw 特征从哪里来
 
-配置里 `source` 可能是：
+配置里 `source` 固定是：
 
 ```text
-pip
-dip
-tip
-mcp_orientation
-pip_orientation
-ip_orientation
-dip_orientation
+ergonomics
 ```
 
-如果是 `tip` 这类位置来源，代码调用：
+配置里的 `ergonomics_keys` 会记录四根手指对应的 MANUS ergonomics 字段，通常类似：
 
-```python
-_finger_yaw_rad(landmarks, source="tip")
+```text
+IndexSpread
+MiddleSpread
+RingSpread
+PinkySpread
 ```
 
-它在手掌局部坐标系里算：
-
-```python
-atan2(dot(direction, lateral), dot(direction, forward))
-```
-
-直觉是：
-
-- 手指朝 forward 方向，yaw 接近 0。
-- 手指往 lateral 方向偏，yaw 变大或变小。
-
-如果是 `pip_orientation` 这类姿态来源，代码用 MANUS raw node 的四元数：
-
-1. 找手掌或手部整体 orientation。
-2. 找某个手指关节 orientation。
-3. 算相对姿态。
-4. 转旋转矩阵。
-5. 从矩阵里取 yaw。
-
-这类来源常常比位置点更稳定，因为它直接来自 MANUS 的关节姿态估计。
+运行时不再用 raw skeleton 点位或 raw node orientation 推四指 yaw，只读取 ergonomics 字段，再套用 open/close/spread 三点映射。
 
 ## 拇指弯曲原理
 

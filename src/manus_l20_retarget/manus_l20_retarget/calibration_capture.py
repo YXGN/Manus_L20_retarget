@@ -12,12 +12,7 @@ import yaml
 from manus_ros2_msgs.msg import ManusGlove
 from rclpy.node import Node
 
-from .manus_landmarks import (
-    _finger_joint_orientation_yaw_rad,
-    _finger_mcp_orientation_yaw_rad,
-    _finger_yaw_rad,
-    manus_raw_nodes_to_mediapipe_landmarks,
-)
+from .manus_landmarks import manus_raw_nodes_to_mediapipe_landmarks
 from .manus_l20_retarget_node import (
     FINGER_LANDMARKS,
     STANDARD_OPEN_COMMAND,
@@ -58,9 +53,6 @@ DEFAULT_THUMB_NATURAL_OPEN_COMMAND = [
     255, 255, 255, 255,
     100, 255, 255, 255, 255,
 ]
-POSITION_SOURCES = ("pip", "dip", "tip")
-ORIENTATION_SOURCES = ("mcp_orientation", "pip_orientation", "ip_orientation", "dip_orientation")
-ORIENTATION_AND_POSITION_SOURCES = (*POSITION_SOURCES, *ORIENTATION_SOURCES)
 FINGER_NAMES = ("index", "middle", "ring", "pinky")
 ERGONOMICS_YAW_TOKENS = ("spread", "abduction", "adduction", "abd", "add", "yaw")
 L20_COMMAND_SLOT_COMMENTS = (
@@ -125,72 +117,6 @@ class FlexionCalibrationCapture(Node):
             "tip_rad": _mean_vector([sample["tip_rad"] for sample in samples]),
             "root_signed_rad": _mean_vector([sample["root_signed_rad"] for sample in samples]),
             "tip_signed_rad": _mean_vector([sample["tip_signed_rad"] for sample in samples]),
-        }
-
-
-class FingerYawCalibrationCapture(Node):
-    def __init__(
-        self,
-        glove_topic: str,
-        transform: str,
-        wrist_mode: str,
-        distal_mode: str,
-        yaw_source: str,
-    ) -> None:
-        super().__init__("manus_l20_finger_yaw_calibration_capture")
-        self._transform = transform
-        self._wrist_mode = wrist_mode
-        self._distal_mode = distal_mode
-        self._yaw_source = yaw_source
-        self._lock = threading.Lock()
-        self._collecting = False
-        self._samples: list[dict[str, list[float]]] = []
-        self.create_subscription(ManusGlove, glove_topic, self._on_glove, 10)
-
-    def _on_glove(self, msg: ManusGlove) -> None:
-        landmarks = manus_raw_nodes_to_mediapipe_landmarks(
-            msg.raw_nodes,
-            transform=self._transform,
-            wrist_mode=self._wrist_mode,
-            distal_mode=self._distal_mode,
-        )
-        yaw_rad_by_source = {
-            source: [float(value) for value in _finger_yaw_rad(landmarks, source=source)]
-            for source in POSITION_SOURCES
-        }
-        yaw_rad_by_source["mcp_orientation"] = [
-            float(value) for value in _finger_mcp_orientation_yaw_rad(msg.raw_nodes)
-        ]
-        for source, joint_type in (
-            ("pip_orientation", "PIP"),
-            ("ip_orientation", "IP"),
-            ("dip_orientation", "DIP"),
-        ):
-            yaw_rad_by_source[source] = [
-                float(value) for value in _finger_joint_orientation_yaw_rad(msg.raw_nodes, joint_type=joint_type)
-            ]
-        with self._lock:
-            if self._collecting:
-                self._samples.append(yaw_rad_by_source)
-
-    def capture(self, duration_sec: float) -> dict[str, Any]:
-        with self._lock:
-            self._samples = []
-            self._collecting = True
-        time.sleep(duration_sec)
-        with self._lock:
-            self._collecting = False
-            samples = list(self._samples)
-        if not samples:
-            raise RuntimeError("no MANUS glove samples captured")
-        all_yaw_rad = {
-            source: _mean_vector([sample[source] for sample in samples])
-            for source in ORIENTATION_AND_POSITION_SOURCES
-        }
-        selected_source = self._yaw_source if self._yaw_source in all_yaw_rad else "pip"
-        return {
-            "yaw_rad": all_yaw_rad[selected_source],
-            "all_yaw_rad": all_yaw_rad,
         }
 
 
@@ -354,21 +280,7 @@ class FullCalibrationCapture(Node):
         start = _manus_thumb_local_point_at(landmarks, self._segment_start)
         end = _manus_thumb_local_point_at(landmarks, self._segment_end)
         vector = end if self._segment_start == self._segment_end else end - start
-        yaw_rad_by_source = {
-            source: [float(value) for value in _finger_yaw_rad(landmarks, source=source)]
-            for source in POSITION_SOURCES
-        }
-        yaw_rad_by_source["mcp_orientation"] = [
-            float(value) for value in _finger_mcp_orientation_yaw_rad(msg.raw_nodes)
-        ]
-        for source, joint_type in (
-            ("pip_orientation", "PIP"),
-            ("ip_orientation", "IP"),
-            ("dip_orientation", "DIP"),
-        ):
-            yaw_rad_by_source[source] = [
-                float(value) for value in _finger_joint_orientation_yaw_rad(msg.raw_nodes, joint_type=joint_type)
-            ]
+        ergonomics = {str(entry.type): float(entry.value) for entry in msg.ergonomics if entry.type}
         sample = {
             "flexion": _flexion_angles(landmarks),
             "thumb_flexion": {
@@ -378,7 +290,7 @@ class FullCalibrationCapture(Node):
                 "tip_signed_rad": _directed_finger_flexion_rad(landmarks, 0, root=False),
             },
             "thumb_segment_vector": [float(value) for value in vector],
-            "yaw": yaw_rad_by_source,
+            "yaw": ergonomics,
         }
         with self._lock:
             if self._collecting:
@@ -408,13 +320,7 @@ class FullCalibrationCapture(Node):
                 "tip_signed_rad": round(float(statistics.fmean(sample["thumb_flexion"]["tip_signed_rad"] for sample in samples)), 6),
             },
             "thumb_segment_vector": _mean_vector([sample["thumb_segment_vector"] for sample in samples]),
-            "yaw": {
-                "yaw_rad": [],
-                "all_yaw_rad": {
-                    source: _mean_vector([sample["yaw"][source] for sample in samples])
-                    for source in ORIENTATION_AND_POSITION_SOURCES
-                },
-            },
+            "yaw": _mean_ergonomics(samples),
         }
 
 
@@ -442,6 +348,15 @@ def _mean_vector(samples: list[list[float]]) -> list[float]:
         round(float(statistics.fmean(sample[index] for sample in samples)), 6)
         for index in range(length)
     ]
+
+
+def _mean_ergonomics(samples: list[dict[str, Any]]) -> dict[str, float]:
+    yaw_samples = [sample.get("yaw") for sample in samples if isinstance(sample.get("yaw"), dict)]
+    keys = sorted({str(key) for sample in yaw_samples for key in sample})
+    return {
+        key: round(float(statistics.fmean(float(sample[key]) for sample in yaw_samples if key in sample)), 6)
+        for key in keys
+    }
 
 
 def _existing_command(path: str) -> dict[str, Any] | None:
@@ -521,63 +436,6 @@ def _build_flexion_calibration(samples: dict[str, dict[str, list[float]]], outpu
         "command": command,
         "samples": samples,
     }
-
-
-def _build_finger_yaw_calibration(samples: dict[str, dict[str, Any]], yaw_source: str, output_path: str) -> dict[str, Any]:
-    selected_source = yaw_source
-    if yaw_source in ("auto", "auto_orientation"):
-        selected_source = _select_best_source(samples, mode=yaw_source)
-    selected_samples = {
-        label: {
-            "yaw_rad": sample["all_yaw_rad"][selected_source],
-            "all_yaw_rad": sample["all_yaw_rad"],
-        }
-        for label, sample in samples.items()
-    }
-    command = _existing_command(output_path) or {
-        "natural_open_command": DEFAULT_L20_OPEN_COMMAND,
-        "finger_close_command": DEFAULT_L20_FINGER_CLOSE_COMMAND,
-        "finger_spread_command": DEFAULT_L20_FINGER_SPREAD_COMMAND,
-    }
-    return {
-        "schema": "manus_l20.finger_yaw_calibration.v1",
-        "finger_order": ["index", "middle", "ring", "pinky"],
-        "source": selected_source,
-        "source_mode": yaw_source,
-        "source_ranges": _source_ranges(samples),
-        "command": command,
-        "samples": selected_samples,
-    }
-
-
-def _source_ranges(samples: dict[str, dict[str, Any]]) -> dict[str, list[float]]:
-    ranges: dict[str, list[float]] = {}
-    open_sample = samples["natural_open"]["all_yaw_rad"]
-    close_sample = samples["finger_close"]["all_yaw_rad"]
-    spread_sample = samples["finger_spread"]["all_yaw_rad"]
-    for source in ORIENTATION_AND_POSITION_SOURCES:
-        ranges[source] = [
-            round(
-                max(
-                    abs(float(close_sample[source][index]) - float(open_sample[source][index])),
-                    abs(float(spread_sample[source][index]) - float(open_sample[source][index])),
-                ),
-                6,
-            )
-            for index in range(4)
-        ]
-    return ranges
-
-
-def _select_best_source(samples: dict[str, dict[str, Any]], *, mode: str) -> str:
-    ranges = _source_ranges(samples)
-    candidate_sources = ORIENTATION_SOURCES if mode == "auto_orientation" else tuple(ranges)
-    totals = {
-        source: sum(values)
-        for source, values in ranges.items()
-        if source in candidate_sources
-    }
-    return max(totals, key=totals.get)
 
 
 def _build_finger_yaw_ergonomics_calibration(
@@ -792,45 +650,6 @@ def run_flexion(parsed: argparse.Namespace) -> None:
         _shutdown_capture_node(node, spin_thread)
 
 
-def run_finger_yaw(parsed: argparse.Namespace) -> None:
-    rclpy.init()
-    node = FingerYawCalibrationCapture(
-        parsed.glove_topic,
-        parsed.transform,
-        parsed.wrist_mode,
-        parsed.distal_mode,
-        parsed.yaw_source,
-    )
-    spin_thread = _spin_capture_node(node)
-    labels = [
-        ("natural_open", "手指自然张开"),
-        ("finger_close", "四指并拢"),
-        ("finger_spread", "四指外展"),
-    ]
-    samples: dict[str, dict[str, Any]] = {}
-    try:
-        for label, prompt in labels:
-            input(f"Set pose '{label}' ({prompt}), hold still, then press Enter...")
-            print(f"Capturing '{label}' for {parsed.duration:.1f}s...")
-            samples[label] = node.capture(parsed.duration)
-            print(yaml.safe_dump({label: samples[label]}, sort_keys=False, allow_unicode=True))
-        calibration = _build_finger_yaw_calibration(samples, parsed.yaw_source, parsed.output)
-        output_path = _save_yaml(calibration, parsed.output)
-        print(
-            yaml.safe_dump(
-                {
-                    "selected_source": calibration["source"],
-                    "source_ranges": calibration["source_ranges"],
-                },
-                sort_keys=False,
-                allow_unicode=True,
-            )
-        )
-        print(f"Saved finger yaw calibration to {output_path}")
-    finally:
-        _shutdown_capture_node(node, spin_thread)
-
-
 def run_finger_yaw_ergonomics(parsed: argparse.Namespace) -> None:
     rclpy.init()
     node = FingerYawErgonomicsCalibrationCapture(parsed.glove_topic)
@@ -976,7 +795,7 @@ def run_all(parsed: argparse.Namespace) -> None:
     if hand == "left" and transform == "right_glove_to_right_retarget":
         transform = "left_glove_to_right_retarget"
     flexion_output = _config_output_path(hand, "flexion_{hand}_calibration.yaml", parsed.flexion_output)
-    yaw_output = _config_output_path(hand, "finger_yaw_{hand}_calibration.yaml", parsed.finger_yaw_output)
+    yaw_output = _config_output_path(hand, "finger_yaw_ergonomics_{hand}_calibration.yaml", parsed.finger_yaw_output)
     thumb_flexion_output = _config_output_path(hand, "thumb_{hand}_flexion_mapping.yaml", parsed.thumb_flexion_output)
     thumb_frame_output = _config_output_path(hand, "thumb_segment_frame_{hand}.yaml", parsed.thumb_frame_output)
 
@@ -1020,7 +839,8 @@ def run_all(parsed: argparse.Namespace) -> None:
         }
 
         flexion_calibration = _build_flexion_calibration(flexion_samples, flexion_output)
-        yaw_calibration = _build_finger_yaw_calibration(yaw_samples, parsed.yaw_source, yaw_output)
+        ergonomics_keys = _parse_key_list(parsed.ergonomics_keys)
+        yaw_calibration = _build_finger_yaw_ergonomics_calibration(yaw_samples, yaw_output, ergonomics_keys)
         thumb_flexion_calibration = _build_thumb_flexion_calibration(thumb_flexion_samples, thumb_flexion_output)
 
         parsed_robot_open = _command_parameter(parsed.robot_open_command, [])
@@ -1063,7 +883,8 @@ def run_all(parsed: argparse.Namespace) -> None:
             yaml.safe_dump(
                 {
                     "finger_yaw_selected_source": yaw_calibration["source"],
-                    "finger_yaw_source_ranges": yaw_calibration["source_ranges"],
+                    "finger_yaw_ergonomics_keys": yaw_calibration["ergonomics_keys"],
+                    "finger_yaw_ergonomics_source_ranges": yaw_calibration["ergonomics_source_ranges"],
                     "saved": [str(path) for path in saved_paths],
                 },
                 sort_keys=False,
@@ -1102,16 +923,6 @@ def _build_parser() -> argparse.ArgumentParser:
     flexion.add_argument("--output", default=str(config_root / "flexion_right_calibration.yaml"))
     flexion.set_defaults(func=run_flexion)
 
-    finger_yaw = subparsers.add_parser("finger-yaw", description="Capture four-finger yaw calibration.")
-    _add_common_glove_args(finger_yaw)
-    finger_yaw.add_argument(
-        "--yaw-source",
-        default="auto_orientation",
-        choices=["auto", "auto_orientation", *ORIENTATION_AND_POSITION_SOURCES],
-    )
-    finger_yaw.add_argument("--output", default=str(config_root / "finger_yaw_right_calibration.yaml"))
-    finger_yaw.set_defaults(func=run_finger_yaw)
-
     ergonomics_yaw = subparsers.add_parser(
         "ergonomics-yaw",
         description="Capture a non-invasive four-finger yaw calibration using MANUS ergonomics values.",
@@ -1119,7 +930,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ergonomics_yaw.add_argument("--glove-topic", default="/manus_glove_0")
     ergonomics_yaw.add_argument("--duration", type=float, default=2.0)
     ergonomics_yaw.add_argument("--ergonomics-keys", default="")
-    ergonomics_yaw.add_argument("--output", default=str(config_root / "finger_yaw_ergonomics_right_test.yaml"))
+    ergonomics_yaw.add_argument("--output", default=str(config_root / "finger_yaw_ergonomics_right_calibration.yaml"))
     ergonomics_yaw.set_defaults(func=run_finger_yaw_ergonomics)
 
     thumb_flexion = subparsers.add_parser("thumb-flexion", description="Capture thumb flexion mapping.")
@@ -1146,11 +957,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_common_glove_args(all_calibration)
     all_calibration.add_argument("--hand", choices=["right", "left"], default="right")
-    all_calibration.add_argument(
-        "--yaw-source",
-        default="auto_orientation",
-        choices=["auto", "auto_orientation", *ORIENTATION_AND_POSITION_SOURCES],
-    )
+    all_calibration.add_argument("--ergonomics-keys", default="")
     all_calibration.add_argument("--segment-start", type=int, default=2)
     all_calibration.add_argument("--segment-end", type=int, default=3)
     all_calibration.add_argument("--flexion-output", default="")

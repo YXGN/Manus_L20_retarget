@@ -66,7 +66,6 @@ def summarize_landmarks(landmarks: np.ndarray) -> dict[str, object]:
     finger_lengths: dict[str, float] = {}
     root_flexion_rad: dict[str, float] = {}
     tip_flexion_rad: dict[str, float] = {}
-    finger_yaw_rad = _finger_yaw_rad(values, source="tip")
     thumb_pose = _thumb_pose_features(values)
     for chain, slots in FINGER_SLOTS.items():
         indices = [0, *slots] if chain != "Thumb" else list(slots)
@@ -85,10 +84,6 @@ def summarize_landmarks(landmarks: np.ndarray) -> dict[str, object]:
         "finger_lengths": finger_lengths,
         "root_flexion_rad": root_flexion_rad,
         "tip_flexion_rad": tip_flexion_rad,
-        "finger_yaw_rad": {
-            chain: round(float(angle), 5)
-            for chain, angle in zip(("Index", "Middle", "Ring", "Pinky"), finger_yaw_rad)
-        },
         "thumb_pose": {
             key: round(float(value), 5)
             for key, value in thumb_pose.items()
@@ -188,64 +183,6 @@ def _joint_flexion_rad(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
     return math.pi - interior_angle
 
 
-def _finger_yaw_rad(landmarks: np.ndarray, *, source: str = "tip") -> np.ndarray:
-    source_pairs_by_name = {
-        "pip": ((5, 6), (9, 10), (13, 14), (17, 18)),
-        "dip": ((5, 7), (9, 11), (13, 15), (17, 19)),
-        "tip": ((5, 8), (9, 12), (13, 16), (17, 20)),
-    }
-    source_pairs = source_pairs_by_name.get(source)
-    if source_pairs is None:
-        raise ValueError(f"unknown finger yaw source: {source}")
-    frame = _palm_frame(landmarks)
-    if frame is None:
-        return np.zeros(4, dtype=np.float64)
-    lateral, forward, _ = frame
-
-    angles = []
-    for mcp_index, target_index in source_pairs:
-        vector = landmarks[target_index] - landmarks[mcp_index]
-        norm = float(np.linalg.norm(vector))
-        if norm <= 1e-8:
-            angles.append(0.0)
-            continue
-        direction = vector / norm
-        angles.append(math.atan2(float(np.dot(direction, lateral)), float(np.dot(direction, forward))))
-    while len(angles) < 4:
-        angles.append(0.0)
-    return np.asarray(angles[:4], dtype=np.float64)
-
-
-def _finger_mcp_orientation_yaw_rad(raw_nodes: list[ManusRawNode]) -> np.ndarray:
-    return _finger_joint_orientation_yaw_rad(raw_nodes, joint_type="MCP")
-
-
-def _finger_joint_orientation_yaw_rad(raw_nodes: list[ManusRawNode], *, joint_type: str) -> np.ndarray:
-    hand_orientation = None
-    node_by_chain: dict[str, ManusRawNode] = {}
-    joint_type = str(joint_type)
-    for node in raw_nodes:
-        chain = str(node.chain_type)
-        joint = str(node.joint_type)
-        if chain == "Hand":
-            hand_orientation = _node_quaternion(node)
-        elif chain in ("Index", "Middle", "Ring", "Pinky") and joint == joint_type:
-            node_by_chain.setdefault(chain, node)
-
-    hand_inverse = _quaternion_inverse(hand_orientation) if hand_orientation is not None else None
-    angles: list[float] = []
-    for chain in ("Index", "Middle", "Ring", "Pinky"):
-        node = node_by_chain.get(chain)
-        if node is None:
-            angles.append(0.0)
-            continue
-        orientation = _node_quaternion(node)
-        relative = _quaternion_multiply(hand_inverse, orientation) if hand_inverse is not None else orientation
-        matrix = _quaternion_to_matrix(relative)
-        angles.append(math.atan2(float(matrix[0, 2]), float(matrix[2, 2])))
-    return np.asarray(angles, dtype=np.float64)
-
-
 def _node_quaternion(node: ManusRawNode) -> np.ndarray:
     orientation = node.pose.orientation
     quat = np.asarray([orientation.x, orientation.y, orientation.z, orientation.w], dtype=np.float64)
@@ -253,45 +190,6 @@ def _node_quaternion(node: ManusRawNode) -> np.ndarray:
     if norm <= 1e-8:
         return np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
     return quat / norm
-
-
-def _quaternion_inverse(quat: np.ndarray) -> np.ndarray:
-    return np.asarray([-quat[0], -quat[1], -quat[2], quat[3]], dtype=np.float64)
-
-
-def _quaternion_multiply(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    lx, ly, lz, lw = left
-    rx, ry, rz, rw = right
-    return np.asarray(
-        [
-            lw * rx + lx * rw + ly * rz - lz * ry,
-            lw * ry - lx * rz + ly * rw + lz * rx,
-            lw * rz + lx * ry - ly * rx + lz * rw,
-            lw * rw - lx * rx - ly * ry - lz * rz,
-        ],
-        dtype=np.float64,
-    )
-
-
-def _quaternion_to_matrix(quat: np.ndarray) -> np.ndarray:
-    x, y, z, w = quat
-    xx = x * x
-    yy = y * y
-    zz = z * z
-    xy = x * y
-    xz = x * z
-    yz = y * z
-    wx = w * x
-    wy = w * y
-    wz = w * z
-    return np.asarray(
-        [
-            [1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy)],
-            [2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx)],
-            [2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy)],
-        ],
-        dtype=np.float64,
-    )
 
 
 def _thumb_pose_features(landmarks: np.ndarray) -> dict[str, float]:

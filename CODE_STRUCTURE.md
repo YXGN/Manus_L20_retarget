@@ -94,10 +94,8 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | `resource/manus_l20_retarget` | ament 资源索引标记。 |
 | `config/flexion_right_calibration.yaml` | 右手四指弯曲映射标定。 |
 | `config/flexion_left_calibration.yaml` | 左手四指弯曲映射标定。 |
-| `config/finger_yaw_right_calibration.yaml` | 右手四指 yaw 映射标定。 |
-| `config/finger_yaw_left_calibration.yaml` | 左手四指 yaw 映射标定。 |
-| `config/finger_yaw_ergonomics_right_calibration.yaml` | 右手四指 yaw 的 MANUS ergonomics 映射标定，存在时 launch 优先使用。 |
-| `config/finger_yaw_ergonomics_left_calibration.yaml` | 左手四指 yaw 的 MANUS ergonomics 映射标定，存在时 launch 优先使用。 |
+| `config/finger_yaw_ergonomics_right_calibration.yaml` | 右手四指 yaw 的 MANUS ergonomics 映射标定。 |
+| `config/finger_yaw_ergonomics_left_calibration.yaml` | 左手四指 yaw 的 MANUS ergonomics 映射标定。 |
 | `config/thumb_right_flexion_mapping.yaml` | 右手拇指 root/tip 弯曲映射。 |
 | `config/thumb_left_flexion_mapping.yaml` | 左手拇指 root/tip 弯曲映射。 |
 | `config/thumb_segment_frame_right.yaml` | 右手拇指 segment IK 的 open/touch 双姿态对齐 frame。 |
@@ -122,7 +120,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py
 | 部位 | 当前策略 |
 | --- | --- |
 | 四指 root/tip 弯曲 | 标定映射。 |
-| 四指 yaw | 优先使用 MANUS ergonomics 的 `IndexSpread` / `MiddleSpread` / `RingSpread` / `PinkySpread` 标定映射；缺少 ergonomics yaw YAML 时回退到 raw skeleton / orientation yaw 标定映射。 |
+| 四指 yaw | 使用 MANUS ergonomics 的 `IndexSpread` / `MiddleSpread` / `RingSpread` / `PinkySpread` 标定映射。 |
 | 拇指 root/tip 弯曲 | 独立拇指弯曲映射。 |
 | 拇指 roll/yaw | MANUS 拇指 2->3 段映射到 L20 `thumb_metacarpals` 的 segment IK。 |
 

@@ -19,9 +19,6 @@ from std_msgs.msg import Bool
 
 from .mapping import clamp_u8
 from .manus_landmarks import (
-    _finger_joint_orientation_yaw_rad,
-    _finger_mcp_orientation_yaw_rad,
-    _finger_yaw_rad,
     _palm_frame,
     _thumb_pose_features,
 )
@@ -152,10 +149,6 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("enable_finger_yaw", False)
         self.declare_parameter("enable_finger_yaw_mapping", False)
         self.declare_parameter("finger_yaw_calibration_path", "")
-        self.declare_parameter("finger_yaw_source", "tip")
-        self.declare_parameter("finger_yaw_open_rad", DEFAULT_FINGER_YAW_OPEN_RAD)
-        self.declare_parameter("finger_yaw_command_gain", -140.0)
-        self.declare_parameter("finger_yaw_max_delta", 35)
         self.declare_parameter("enable_thumb_yaw", False)
         self.declare_parameter("enable_thumb_roll", False)
         self.declare_parameter("enable_thumb_flexion_mapping", False)
@@ -371,14 +364,6 @@ class ManusL20RetargetNode(Node):
         )
         self._apply_flexion_calibration_path(str(self.get_parameter("flexion_calibration_path").value))
         self._apply_thumb_flexion_mapping_path(str(self.get_parameter("thumb_flexion_mapping_path").value))
-        self._finger_yaw_open_rad = _float_list_parameter(
-            self.get_parameter("finger_yaw_open_rad").value,
-            DEFAULT_FINGER_YAW_OPEN_RAD,
-            length=4,
-        )
-        self._finger_yaw_source = str(self.get_parameter("finger_yaw_source").value)
-        self._finger_yaw_command_gain = float(self.get_parameter("finger_yaw_command_gain").value)
-        self._finger_yaw_max_delta = max(0, int(self.get_parameter("finger_yaw_max_delta").value))
         self._apply_finger_yaw_calibration_path(str(self.get_parameter("finger_yaw_calibration_path").value))
         self._flexion_open_straightness_threshold = max(
             0.0,
@@ -539,27 +524,18 @@ class ManusL20RetargetNode(Node):
         open_command = _command_parameter(command_data.get("natural_open_command"), self._neutral_command)
         close_command = _command_parameter(command_data.get("finger_close_command"), self._neutral_command)
         spread_command = _command_parameter(command_data.get("finger_spread_command"), self._neutral_command)
-        source = str(data.get("source", self._finger_yaw_source)).strip().lower()
-        if source not in (
-            "pip",
-            "dip",
-            "tip",
-            "mcp_orientation",
-            "pip_orientation",
-            "ip_orientation",
-            "dip_orientation",
-            "ergonomics",
-        ):
-            self.get_logger().warning(f"unknown finger yaw calibration source={source!r}; using {self._finger_yaw_source!r}")
-            source = self._finger_yaw_source
+        source = str(data.get("source", "")).strip().lower()
+        if source != "ergonomics":
+            self.get_logger().warning(
+                f"finger yaw calibration source={source!r} is no longer supported; "
+                "use an ergonomics yaw calibration file"
+            )
+            return
         ergonomics_keys = data.get("ergonomics_keys")
-        if source == "ergonomics":
-            if not isinstance(ergonomics_keys, list) or len(ergonomics_keys) != 4:
-                self.get_logger().warning(f"finger yaw ergonomics calibration missing four ergonomics_keys: {path}")
-                return
-            ergonomics_keys = [str(key) for key in ergonomics_keys]
-        else:
-            ergonomics_keys = []
+        if not isinstance(ergonomics_keys, list) or len(ergonomics_keys) != 4:
+            self.get_logger().warning(f"finger yaw ergonomics calibration missing four ergonomics_keys: {path}")
+            return
+        ergonomics_keys = [str(key) for key in ergonomics_keys]
         try:
             self._finger_yaw_mapping = {
                 "source": source,
@@ -944,7 +920,7 @@ class ManusL20RetargetNode(Node):
         )
         command = self._l20_command_adapter.command_from_targets(targets)
         if self._enable_finger_yaw:
-            self._apply_finger_yaw(command, landmarks, features.raw_nodes, features.ergonomics)
+            self._apply_finger_yaw(command, features.ergonomics)
         if self._enable_thumb_flexion_mapping:
             self._apply_thumb_flexion_mapping(command, landmarks)
         if self._enable_thumb_yaw or self._enable_thumb_roll:
@@ -958,78 +934,51 @@ class ManusL20RetargetNode(Node):
     def _apply_finger_yaw(
         self,
         command: list[int],
-        landmarks: np.ndarray,
-        raw_nodes: list[Any] | None = None,
-        ergonomics: dict[str, float] | None = None,
+        ergonomics: dict[str, float],
     ) -> None:
-        if self._finger_yaw_mapping is not None:
-            source = str(self._finger_yaw_mapping["source"])
-            if source == "ergonomics":
-                if ergonomics is None:
-                    return
-                keys = self._finger_yaw_mapping.get("ergonomics_keys") or []
-                if len(keys) != 4:
-                    return
-                try:
-                    yaw_angles = np.asarray([float(ergonomics[str(key)]) for key in keys], dtype=np.float64)
-                except (KeyError, TypeError, ValueError):
-                    return
-            elif source == "mcp_orientation":
-                if raw_nodes is None:
-                    return
-                yaw_angles = _finger_mcp_orientation_yaw_rad(raw_nodes)
-            elif source in ("pip_orientation", "ip_orientation", "dip_orientation"):
-                if raw_nodes is None:
-                    return
-                joint_type = {
-                    "pip_orientation": "PIP",
-                    "ip_orientation": "IP",
-                    "dip_orientation": "DIP",
-                }[source]
-                yaw_angles = _finger_joint_orientation_yaw_rad(raw_nodes, joint_type=joint_type)
-            else:
-                yaw_angles = _finger_yaw_rad(landmarks, source=source)
-            open_rad = self._finger_yaw_mapping["open_rad"]
-            close_rad = self._finger_yaw_mapping["close_rad"]
-            spread_rad = self._finger_yaw_mapping["spread_rad"]
-            open_cmd = self._finger_yaw_mapping["open_cmd"]
-            close_cmd = self._finger_yaw_mapping["close_cmd"]
-            spread_cmd = self._finger_yaw_mapping["spread_cmd"]
-            for local_index, angle in enumerate(yaw_angles):
-                slot = 6 + local_index
-                open_value = int(open_cmd[local_index])
-                close_amount = _normalized_signed_segment(
-                    float(angle),
-                    float(open_rad[local_index]),
-                    float(close_rad[local_index]),
-                )
-                spread_amount = _normalized_signed_segment(
-                    float(angle),
-                    float(open_rad[local_index]),
-                    float(spread_rad[local_index]),
-                )
-                if close_amount >= spread_amount:
-                    yaw_command = _lerp_command(
-                        open_value,
-                        int(close_cmd[local_index]),
-                        close_amount,
-                    )
-                else:
-                    yaw_command = _lerp_command(
-                        open_value,
-                        int(spread_cmd[local_index]),
-                        spread_amount,
-                    )
-                command[slot] = yaw_command
+        mapping = self._finger_yaw_mapping
+        if mapping is None:
             return
 
-        yaw_angles = _finger_yaw_rad(landmarks, source=self._finger_yaw_source)
+        keys = mapping.get("ergonomics_keys") or []
+        if len(keys) != 4:
+            return
+        try:
+            yaw_angles = np.asarray([float(ergonomics[str(key)]) for key in keys], dtype=np.float64)
+        except (KeyError, TypeError, ValueError):
+            return
+
+        open_rad = mapping["open_rad"]
+        close_rad = mapping["close_rad"]
+        spread_rad = mapping["spread_rad"]
+        open_cmd = mapping["open_cmd"]
+        close_cmd = mapping["close_cmd"]
+        spread_cmd = mapping["spread_cmd"]
         for local_index, angle in enumerate(yaw_angles):
             slot = 6 + local_index
-            neutral = self._neutral_command[slot]
-            delta = self._finger_yaw_command_gain * (float(angle) - self._finger_yaw_open_rad[local_index])
-            delta = max(-self._finger_yaw_max_delta, min(self._finger_yaw_max_delta, delta))
-            yaw_command = clamp_u8(neutral + delta)
+            open_value = int(open_cmd[local_index])
+            close_amount = _normalized_signed_segment(
+                float(angle),
+                float(open_rad[local_index]),
+                float(close_rad[local_index]),
+            )
+            spread_amount = _normalized_signed_segment(
+                float(angle),
+                float(open_rad[local_index]),
+                float(spread_rad[local_index]),
+            )
+            if close_amount >= spread_amount:
+                yaw_command = _lerp_command(
+                    open_value,
+                    int(close_cmd[local_index]),
+                    close_amount,
+                )
+            else:
+                yaw_command = _lerp_command(
+                    open_value,
+                    int(spread_cmd[local_index]),
+                    spread_amount,
+                )
             command[slot] = yaw_command
 
     def _apply_thumb_pose(self, command: list[int], landmarks: np.ndarray) -> None:

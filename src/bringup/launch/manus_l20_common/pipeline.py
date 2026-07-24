@@ -46,10 +46,6 @@ def _flexion_config_name(hand_type: str) -> str:
     return "flexion_left_calibration.yaml" if hand_type == "left" else "flexion_right_calibration.yaml"
 
 
-def _finger_yaw_config_name(hand_type: str) -> str:
-    return "finger_yaw_left_calibration.yaml" if hand_type == "left" else "finger_yaw_right_calibration.yaml"
-
-
 def _finger_yaw_ergonomics_config_name(hand_type: str) -> str:
     return (
         "finger_yaw_ergonomics_left_calibration.yaml"
@@ -59,10 +55,7 @@ def _finger_yaw_ergonomics_config_name(hand_type: str) -> str:
 
 
 def _finger_yaw_calibration_file(hand_type: str) -> str:
-    ergonomics_path = Path(_config_file(_finger_yaw_ergonomics_config_name(hand_type)))
-    if ergonomics_path.exists():
-        return str(ergonomics_path)
-    return _config_file(_finger_yaw_config_name(hand_type))
+    return _config_file(_finger_yaw_ergonomics_config_name(hand_type))
 
 
 def _thumb_flexion_config_name(hand_type: str) -> str:
@@ -106,9 +99,6 @@ def _hand_actions(
     enable_finger_yaw,
     enable_finger_yaw_mapping,
     finger_yaw_calibration_path,
-    finger_yaw_source,
-    finger_yaw_command_gain,
-    finger_yaw_max_delta,
     flexion_calibration_path,
     enable_thumb_flexion_mapping,
     thumb_flexion_mapping_path,
@@ -193,9 +183,6 @@ def _hand_actions(
                     "enable_finger_yaw": enable_finger_yaw,
                     "enable_finger_yaw_mapping": enable_finger_yaw_mapping,
                     "finger_yaw_calibration_path": finger_yaw_calibration_path,
-                    "finger_yaw_source": finger_yaw_source,
-                    "finger_yaw_command_gain": finger_yaw_command_gain,
-                    "finger_yaw_max_delta": finger_yaw_max_delta,
                     "flexion_calibration_path": flexion_calibration_path,
                     "enable_thumb_flexion_mapping": enable_thumb_flexion_mapping,
                     "thumb_flexion_mapping_path": thumb_flexion_mapping_path,
@@ -357,9 +344,6 @@ def generate_manus_l20_launch(
                 "finger_yaw_calibration_path",
                 default_value=_finger_yaw_calibration_file(logic_type),
             ),
-            DeclareLaunchArgument("finger_yaw_source", default_value="tip"),
-            DeclareLaunchArgument("finger_yaw_command_gain", default_value="-500.0"),
-            DeclareLaunchArgument("finger_yaw_max_delta", default_value="120"),
             DeclareLaunchArgument(
                 "flexion_calibration_path",
                 default_value=_config_file(_flexion_config_name(logic_type)),
@@ -452,9 +436,6 @@ def generate_manus_l20_launch(
                 enable_finger_yaw=LaunchConfiguration("enable_finger_yaw"),
                 enable_finger_yaw_mapping=LaunchConfiguration("enable_finger_yaw_mapping"),
                 finger_yaw_calibration_path=LaunchConfiguration("finger_yaw_calibration_path"),
-                finger_yaw_source=LaunchConfiguration("finger_yaw_source"),
-                finger_yaw_command_gain=LaunchConfiguration("finger_yaw_command_gain"),
-                finger_yaw_max_delta=LaunchConfiguration("finger_yaw_max_delta"),
                 flexion_calibration_path=LaunchConfiguration("flexion_calibration_path"),
                 enable_thumb_flexion_mapping=LaunchConfiguration("enable_thumb_flexion_mapping"),
                 thumb_flexion_mapping_path=LaunchConfiguration("thumb_flexion_mapping_path"),
@@ -569,9 +550,6 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         DeclareLaunchArgument("enable_finger_yaw_mapping", default_value="true"),
         DeclareLaunchArgument("right_finger_yaw_calibration_path", default_value=_finger_yaw_calibration_file("right")),
         DeclareLaunchArgument("left_finger_yaw_calibration_path", default_value=_finger_yaw_calibration_file("left")),
-        DeclareLaunchArgument("finger_yaw_source", default_value="tip"),
-        DeclareLaunchArgument("finger_yaw_command_gain", default_value="-500.0"),
-        DeclareLaunchArgument("finger_yaw_max_delta", default_value="120"),
         DeclareLaunchArgument("enable_thumb_flexion_mapping", default_value="true"),
         DeclareLaunchArgument("thumb_flexion_root_gamma", default_value="1.0"),
         DeclareLaunchArgument("thumb_flexion_tip_gamma", default_value="1.0"),
@@ -660,9 +638,6 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
             enable_finger_yaw=LaunchConfiguration("enable_finger_yaw"),
             enable_finger_yaw_mapping=LaunchConfiguration("enable_finger_yaw_mapping"),
             finger_yaw_calibration_path=LaunchConfiguration(finger_yaw_calibration_path_name),
-            finger_yaw_source=LaunchConfiguration("finger_yaw_source"),
-            finger_yaw_command_gain=LaunchConfiguration("finger_yaw_command_gain"),
-            finger_yaw_max_delta=LaunchConfiguration("finger_yaw_max_delta"),
             flexion_calibration_path=_config_file(_flexion_config_name(hand_type)),
             enable_thumb_flexion_mapping=LaunchConfiguration("enable_thumb_flexion_mapping"),
             thumb_flexion_mapping_path=_config_file(_thumb_flexion_config_name(hand_type)),
