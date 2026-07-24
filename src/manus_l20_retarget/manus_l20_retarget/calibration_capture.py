@@ -63,6 +63,28 @@ ORIENTATION_SOURCES = ("mcp_orientation", "pip_orientation", "ip_orientation", "
 ORIENTATION_AND_POSITION_SOURCES = (*POSITION_SOURCES, *ORIENTATION_SOURCES)
 FINGER_NAMES = ("index", "middle", "ring", "pinky")
 ERGONOMICS_YAW_TOKENS = ("spread", "abduction", "adduction", "abd", "add", "yaw")
+L20_COMMAND_SLOT_COMMENTS = (
+    "0  Thumb Base / 拇指根部弯曲",
+    "1  Index Finger Base / 食指根部弯曲",
+    "2  Middle Finger Base / 中指根部弯曲",
+    "3  Ring Finger Base / 无名指根部弯曲",
+    "4  Pinky Finger Base / 小指根部弯曲",
+    "5  Thumb Roll / 拇指 roll",
+    "6  Index Finger Yaw / 食指侧摆",
+    "7  Middle Finger Yaw / 中指侧摆",
+    "8  Ring Finger Yaw / 无名指侧摆",
+    "9  Pinky Finger Yaw / 小指侧摆",
+    "10 Thumb Yaw / 拇指 yaw",
+    "11 Reserved / 保留位",
+    "12 Reserved / 保留位",
+    "13 Reserved / 保留位",
+    "14 Reserved / 保留位",
+    "15 Thumb Tip / 拇指指尖弯曲",
+    "16 Index Finger Tip / 食指指尖弯曲",
+    "17 Middle Finger Tip / 中指指尖弯曲",
+    "18 Ring Finger Tip / 无名指指尖弯曲",
+    "19 Pinky Finger Tip / 小指指尖弯曲",
+)
 
 
 class FlexionCalibrationCapture(Node):
@@ -695,8 +717,57 @@ def _save_yaml(payload: dict[str, Any], output: str) -> Path:
     output_path = Path(output).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(payload, handle, sort_keys=False, allow_unicode=True)
+        handle.write(_dump_yaml_with_l20_command_comments(payload))
     return output_path
+
+
+def _dump_yaml_with_l20_command_comments(payload: dict[str, Any]) -> str:
+    text = yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
+    lines = text.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        output.append(line)
+        key = line.strip()[:-1] if line.strip().endswith(":") else ""
+        if _is_l20_command_key(key) and _next_block_is_20_item_list(lines, index + 1, _indent_of(line)):
+            for slot, comment in enumerate(L20_COMMAND_SLOT_COMMENTS):
+                index += 1
+                output.append(_append_slot_comment(lines[index], comment))
+        index += 1
+    return "\n".join(output) + "\n"
+
+
+def _is_l20_command_key(key: str) -> bool:
+    return key.endswith("_command") or key in {"robot_open_command", "robot_touch_command"}
+
+
+def _next_block_is_20_item_list(lines: list[str], start_index: int, parent_indent: int) -> bool:
+    count = 0
+    for line in lines[start_index:]:
+        if not line.strip():
+            continue
+        indent = _indent_of(line)
+        if line.lstrip().startswith("- "):
+            if indent < parent_indent:
+                break
+            count += 1
+            if count > len(L20_COMMAND_SLOT_COMMENTS):
+                return False
+            continue
+        if indent <= parent_indent:
+            break
+        break
+    return count == len(L20_COMMAND_SLOT_COMMENTS)
+
+
+def _append_slot_comment(line: str, comment: str) -> str:
+    value = line.split("#", 1)[0].rstrip()
+    return f"{value:<10} # {comment}"
+
+
+def _indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
 
 
 def run_flexion(parsed: argparse.Namespace) -> None:
