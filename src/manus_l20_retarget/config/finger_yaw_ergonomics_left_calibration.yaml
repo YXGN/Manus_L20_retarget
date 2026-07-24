@@ -18,68 +18,68 @@ ergonomics_source_ranges:
   PinkySpread: 29.202272
 command:
   natural_open_command:
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 128
-  - 163
-  - 129
-  - 86
-  - 62
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
+  - 255    # 0  Thumb Base / 拇指根部弯曲
+  - 255    # 1  Index Finger Base / 食指根部弯曲
+  - 255    # 2  Middle Finger Base / 中指根部弯曲
+  - 255    # 3  Ring Finger Base / 无名指根部弯曲
+  - 255    # 4  Pinky Finger Base / 小指根部弯曲
+  - 128    # 5  Thumb Roll / 拇指 roll
+  - 163    # 6  Index Finger Yaw / 食指侧摆
+  - 129    # 7  Middle Finger Yaw / 中指侧摆
+  - 86     # 8  Ring Finger Yaw / 无名指侧摆
+  - 62     # 9  Pinky Finger Yaw / 小指侧摆
+  - 255    # 10 Thumb Yaw / 拇指 yaw
+  - 255    # 11 Reserved / 保留位
+  - 255    # 12 Reserved / 保留位
+  - 255    # 13 Reserved / 保留位
+  - 255    # 14 Reserved / 保留位
+  - 255    # 15 Thumb Tip / 拇指指尖弯曲
+  - 255    # 16 Index Finger Tip / 食指指尖弯曲
+  - 255    # 17 Middle Finger Tip / 中指指尖弯曲
+  - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
+  - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
   finger_close_command:
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 128
-  - 60
-  - 85
-  - 136
-  - 166
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
+  - 255    # 0  Thumb Base / 拇指根部弯曲
+  - 255    # 1  Index Finger Base / 食指根部弯曲
+  - 255    # 2  Middle Finger Base / 中指根部弯曲
+  - 255    # 3  Ring Finger Base / 无名指根部弯曲
+  - 255    # 4  Pinky Finger Base / 小指根部弯曲
+  - 128    # 5  Thumb Roll / 拇指 roll
+  - 60     # 6  Index Finger Yaw / 食指侧摆
+  - 85     # 7  Middle Finger Yaw / 中指侧摆
+  - 136    # 8  Ring Finger Yaw / 无名指侧摆
+  - 166    # 9  Pinky Finger Yaw / 小指侧摆
+  - 255    # 10 Thumb Yaw / 拇指 yaw
+  - 255    # 11 Reserved / 保留位
+  - 255    # 12 Reserved / 保留位
+  - 255    # 13 Reserved / 保留位
+  - 255    # 14 Reserved / 保留位
+  - 255    # 15 Thumb Tip / 拇指指尖弯曲
+  - 255    # 16 Index Finger Tip / 食指指尖弯曲
+  - 255    # 17 Middle Finger Tip / 中指指尖弯曲
+  - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
+  - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
   finger_spread_command:
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 128
-  - 255
-  - 169
-  - 46
-  - 0
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
+  - 255    # 0  Thumb Base / 拇指根部弯曲
+  - 255    # 1  Index Finger Base / 食指根部弯曲
+  - 255    # 2  Middle Finger Base / 中指根部弯曲
+  - 255    # 3  Ring Finger Base / 无名指根部弯曲
+  - 255    # 4  Pinky Finger Base / 小指根部弯曲
+  - 128    # 5  Thumb Roll / 拇指 roll
+  - 255    # 6  Index Finger Yaw / 食指侧摆
+  - 169    # 7  Middle Finger Yaw / 中指侧摆
+  - 46     # 8  Ring Finger Yaw / 无名指侧摆
+  - 0      # 9  Pinky Finger Yaw / 小指侧摆
+  - 255    # 10 Thumb Yaw / 拇指 yaw
+  - 255    # 11 Reserved / 保留位
+  - 255    # 12 Reserved / 保留位
+  - 255    # 13 Reserved / 保留位
+  - 255    # 14 Reserved / 保留位
+  - 255    # 15 Thumb Tip / 拇指指尖弯曲
+  - 255    # 16 Index Finger Tip / 食指指尖弯曲
+  - 255    # 17 Middle Finger Tip / 中指指尖弯曲
+  - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
+  - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
 samples:
   natural_open:
     yaw_rad:

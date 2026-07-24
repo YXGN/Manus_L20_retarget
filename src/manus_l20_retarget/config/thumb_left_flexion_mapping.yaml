@@ -4,55 +4,55 @@ root_flexion_direction_sign: 1.0
 tip_flexion_direction_sign: 1.0
 command:
   thumb_natural_open_command:
-  - 160
-  - 255
-  - 255
-  - 255
-  - 255
-  - 150
-  - 163
-  - 129
-  - 86
-  - 62
-  - 255
-  - 255
-  - 255
-  - 255
-  - 255
-  - 220
-  - 255
-  - 255
-  - 255
-  - 255
+  - 160    # 0  Thumb Base / 拇指根部弯曲
+  - 255    # 1  Index Finger Base / 食指根部弯曲
+  - 255    # 2  Middle Finger Base / 中指根部弯曲
+  - 255    # 3  Ring Finger Base / 无名指根部弯曲
+  - 255    # 4  Pinky Finger Base / 小指根部弯曲
+  - 150    # 5  Thumb Roll / 拇指 roll
+  - 163    # 6  Index Finger Yaw / 食指侧摆
+  - 129    # 7  Middle Finger Yaw / 中指侧摆
+  - 86     # 8  Ring Finger Yaw / 无名指侧摆
+  - 62     # 9  Pinky Finger Yaw / 小指侧摆
+  - 255    # 10 Thumb Yaw / 拇指 yaw
+  - 255    # 11 Reserved / 保留位
+  - 255    # 12 Reserved / 保留位
+  - 255    # 13 Reserved / 保留位
+  - 255    # 14 Reserved / 保留位
+  - 240    # 15 Thumb Tip / 拇指指尖弯曲
+  - 255    # 16 Index Finger Tip / 食指指尖弯曲
+  - 255    # 17 Middle Finger Tip / 中指指尖弯曲
+  - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
+  - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
   thumb_pinky_root_touch_command:
-  - 60
-  - 255
-  - 255
-  - 255
-  - 255
-  - 0
-  - 163
-  - 129
-  - 86
-  - 62
-  - 100
-  - 255
-  - 255
-  - 255
-  - 255
-  - 120
-  - 255
-  - 255
-  - 255
-  - 255
+  - 60     # 0  Thumb Base / 拇指根部弯曲
+  - 255    # 1  Index Finger Base / 食指根部弯曲
+  - 255    # 2  Middle Finger Base / 中指根部弯曲
+  - 255    # 3  Ring Finger Base / 无名指根部弯曲
+  - 255    # 4  Pinky Finger Base / 小指根部弯曲
+  - 0      # 5  Thumb Roll / 拇指 roll
+  - 163    # 6  Index Finger Yaw / 食指侧摆
+  - 129    # 7  Middle Finger Yaw / 中指侧摆
+  - 86     # 8  Ring Finger Yaw / 无名指侧摆
+  - 62     # 9  Pinky Finger Yaw / 小指侧摆
+  - 100    # 10 Thumb Yaw / 拇指 yaw
+  - 255    # 11 Reserved / 保留位
+  - 255    # 12 Reserved / 保留位
+  - 255    # 13 Reserved / 保留位
+  - 255    # 14 Reserved / 保留位
+  - 140    # 15 Thumb Tip / 拇指指尖弯曲
+  - 255    # 16 Index Finger Tip / 食指指尖弯曲
+  - 255    # 17 Middle Finger Tip / 中指指尖弯曲
+  - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
+  - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
 samples:
   thumb_pinky_root_touch:
-    root_rad: 0.008124
-    tip_rad: 1.156268
-    root_signed_rad: 0.008124
-    tip_signed_rad: 1.156268
+    root_rad: 0.150391
+    tip_rad: 0.931578
+    root_signed_rad: 0.150391
+    tip_signed_rad: 0.931578
   thumb_natural_open:
     root_rad: 0.0
     tip_rad: 0.0
-    root_signed_rad: -0.005043
-    tip_signed_rad: -0.534685
+    root_signed_rad: -0.000786
+    tip_signed_rad: -0.39354

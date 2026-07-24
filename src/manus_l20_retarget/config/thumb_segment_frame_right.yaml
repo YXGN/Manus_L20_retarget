@@ -2,52 +2,52 @@ schema: manus_l20.thumb_segment_frame.v1
 segment_start: 2
 segment_end: 3
 manus_open_vector:
-- -0.022896
-- 0.023284
-- 0.002997
+- -0.023512
+- 0.019675
+- 0.009883
 manus_touch_vector:
-- 0.012842
-- 0.029723
-- 0.005184
+- 0.012603
+- 0.02854
+- 0.008014
 robot_open_command:
-- 254
-- 248
-- 246
-- 249
-- 254
-- 128
-- 115
-- 111
-- 131
-- 188
-- 221
-- 255
-- 255
-- 255
-- 255
-- 254
-- 254
-- 254
-- 254
-- 254
+- 254      # 0  Thumb Base / 拇指根部弯曲
+- 248      # 1  Index Finger Base / 食指根部弯曲
+- 246      # 2  Middle Finger Base / 中指根部弯曲
+- 249      # 3  Ring Finger Base / 无名指根部弯曲
+- 254      # 4  Pinky Finger Base / 小指根部弯曲
+- 128      # 5  Thumb Roll / 拇指 roll
+- 115      # 6  Index Finger Yaw / 食指侧摆
+- 111      # 7  Middle Finger Yaw / 中指侧摆
+- 131      # 8  Ring Finger Yaw / 无名指侧摆
+- 188      # 9  Pinky Finger Yaw / 小指侧摆
+- 221      # 10 Thumb Yaw / 拇指 yaw
+- 255      # 11 Reserved / 保留位
+- 255      # 12 Reserved / 保留位
+- 255      # 13 Reserved / 保留位
+- 255      # 14 Reserved / 保留位
+- 254      # 15 Thumb Tip / 拇指指尖弯曲
+- 254      # 16 Index Finger Tip / 食指指尖弯曲
+- 254      # 17 Middle Finger Tip / 中指指尖弯曲
+- 254      # 18 Ring Finger Tip / 无名指指尖弯曲
+- 254      # 19 Pinky Finger Tip / 小指指尖弯曲
 robot_touch_command:
-- 60
-- 255
-- 255
-- 255
-- 255
-- 0
-- 163
-- 129
-- 86
-- 62
-- 100
-- 255
-- 255
-- 255
-- 255
-- 120
-- 255
-- 255
-- 255
-- 255
+- 60       # 0  Thumb Base / 拇指根部弯曲
+- 255      # 1  Index Finger Base / 食指根部弯曲
+- 255      # 2  Middle Finger Base / 中指根部弯曲
+- 255      # 3  Ring Finger Base / 无名指根部弯曲
+- 255      # 4  Pinky Finger Base / 小指根部弯曲
+- 0        # 5  Thumb Roll / 拇指 roll
+- 163      # 6  Index Finger Yaw / 食指侧摆
+- 129      # 7  Middle Finger Yaw / 中指侧摆
+- 86       # 8  Ring Finger Yaw / 无名指侧摆
+- 62       # 9  Pinky Finger Yaw / 小指侧摆
+- 100      # 10 Thumb Yaw / 拇指 yaw
+- 255      # 11 Reserved / 保留位
+- 255      # 12 Reserved / 保留位
+- 255      # 13 Reserved / 保留位
+- 255      # 14 Reserved / 保留位
+- 120      # 15 Thumb Tip / 拇指指尖弯曲
+- 255      # 16 Index Finger Tip / 食指指尖弯曲
+- 255      # 17 Middle Finger Tip / 中指指尖弯曲
+- 255      # 18 Ring Finger Tip / 无名指指尖弯曲
+- 255      # 19 Pinky Finger Tip / 小指指尖弯曲
