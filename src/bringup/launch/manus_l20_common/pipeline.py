@@ -6,7 +6,7 @@ from pathlib import Path
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, OrSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -140,6 +140,12 @@ def _hand_actions(
     l20_thumb_ik_root,
     l20_thumb_ik_config_path,
     linkerhand_sdk_root,
+    enable_force_hold,
+    force_hold_threshold,
+    force_hold_contact_samples,
+    force_hold_release_delta,
+    force_hold_feedback_timeout_sec,
+    force_hold_state_timeout_sec,
     enable_haptics,
     mock_tactile,
     haptic_glove_id,
@@ -221,6 +227,14 @@ def _hand_actions(
                     "thumb_roll_command_gain": thumb_roll_command_gain,
                     "thumb_yaw_max_delta": thumb_yaw_max_delta,
                     "thumb_roll_max_delta": thumb_roll_max_delta,
+                    "enable_force_hold": enable_force_hold,
+                    "force_topic": haptic_force_topic,
+                    "state_topic": f"/cb_{hand_type}_hand_state",
+                    "force_hold_threshold": force_hold_threshold,
+                    "force_hold_contact_samples": force_hold_contact_samples,
+                    "force_hold_release_delta": force_hold_release_delta,
+                    "force_hold_feedback_timeout_sec": force_hold_feedback_timeout_sec,
+                    "force_hold_state_timeout_sec": force_hold_state_timeout_sec,
                     "flexion_open_straightness_threshold": flexion_open_straightness_threshold,
                     "flexion_open_angle_deadband_rad": flexion_open_angle_deadband_rad,
                 }
@@ -231,12 +245,12 @@ def _hand_actions(
             executable="tactile_source_node",
             name=f"linkerhand_l20_tactile_source_{hand_type}",
             output="screen",
-            condition=IfCondition(enable_haptics),
+            condition=IfCondition(OrSubstitution(enable_force_hold, enable_haptics)),
             parameters=[
                 {
                     "enabled": True,
                     "mock": mock_tactile,
-                    "hand_joint": "L20",
+                    "hand_joint": "G20",
                     "hand_type": hand_type,
                     "can_channel": can,
                     "poll_rate_hz": haptic_poll_rate_hz,
@@ -319,6 +333,12 @@ def generate_manus_l20_launch(
             DeclareLaunchArgument("load_manus_calibration", default_value="true"),
             DeclareLaunchArgument("left_manus_calibration_path", default_value=_manus_calibration_file("left")),
             DeclareLaunchArgument("right_manus_calibration_path", default_value=_manus_calibration_file("right")),
+            DeclareLaunchArgument("enable_force_hold", default_value="true"),
+            DeclareLaunchArgument("force_hold_threshold", default_value="5.0"),
+            DeclareLaunchArgument("force_hold_contact_samples", default_value="2"),
+            DeclareLaunchArgument("force_hold_release_delta", default_value="0.05"),
+            DeclareLaunchArgument("force_hold_feedback_timeout_sec", default_value="0.1"),
+            DeclareLaunchArgument("force_hold_state_timeout_sec", default_value="0.1"),
             DeclareLaunchArgument("enable_haptics", default_value="false"),
             DeclareLaunchArgument("mock_tactile", default_value="false"),
             DeclareLaunchArgument("haptic_glove_id", default_value="0"),
@@ -479,6 +499,12 @@ def generate_manus_l20_launch(
                 l20_thumb_ik_root=LaunchConfiguration("l20_thumb_ik_root"),
                 l20_thumb_ik_config_path=LaunchConfiguration("l20_thumb_ik_config_path"),
                 linkerhand_sdk_root=LaunchConfiguration("linkerhand_sdk_root"),
+                enable_force_hold=LaunchConfiguration("enable_force_hold"),
+                force_hold_threshold=LaunchConfiguration("force_hold_threshold"),
+                force_hold_contact_samples=LaunchConfiguration("force_hold_contact_samples"),
+                force_hold_release_delta=LaunchConfiguration("force_hold_release_delta"),
+                force_hold_feedback_timeout_sec=LaunchConfiguration("force_hold_feedback_timeout_sec"),
+                force_hold_state_timeout_sec=LaunchConfiguration("force_hold_state_timeout_sec"),
                 enable_haptics=LaunchConfiguration("enable_haptics"),
                 mock_tactile=LaunchConfiguration("mock_tactile"),
                 haptic_glove_id=LaunchConfiguration("haptic_glove_id"),
@@ -523,6 +549,12 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         DeclareLaunchArgument("load_manus_calibration", default_value="true"),
         DeclareLaunchArgument("left_manus_calibration_path", default_value=_manus_calibration_file("left")),
         DeclareLaunchArgument("right_manus_calibration_path", default_value=_manus_calibration_file("right")),
+        DeclareLaunchArgument("enable_force_hold", default_value="true"),
+        DeclareLaunchArgument("force_hold_threshold", default_value="5.0"),
+        DeclareLaunchArgument("force_hold_contact_samples", default_value="2"),
+        DeclareLaunchArgument("force_hold_release_delta", default_value="0.05"),
+        DeclareLaunchArgument("force_hold_feedback_timeout_sec", default_value="0.1"),
+        DeclareLaunchArgument("force_hold_state_timeout_sec", default_value="0.1"),
         DeclareLaunchArgument("enable_haptics", default_value="false"),
         DeclareLaunchArgument("mock_tactile", default_value="false"),
         DeclareLaunchArgument("right_haptic_glove_id", default_value="0"),
@@ -683,6 +715,12 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
                 _THUMB_IK_ROOT / "configs" / "retargeting" / retarget_type / f"linkerhand_l20_{retarget_type}.yaml"
             ),
             linkerhand_sdk_root=LaunchConfiguration("linkerhand_sdk_root"),
+            enable_force_hold=LaunchConfiguration("enable_force_hold"),
+            force_hold_threshold=LaunchConfiguration("force_hold_threshold"),
+            force_hold_contact_samples=LaunchConfiguration("force_hold_contact_samples"),
+            force_hold_release_delta=LaunchConfiguration("force_hold_release_delta"),
+            force_hold_feedback_timeout_sec=LaunchConfiguration("force_hold_feedback_timeout_sec"),
+            force_hold_state_timeout_sec=LaunchConfiguration("force_hold_state_timeout_sec"),
             enable_haptics=LaunchConfiguration("enable_haptics"),
             mock_tactile=LaunchConfiguration("mock_tactile"),
             haptic_glove_id=LaunchConfiguration(haptic_glove_id_name),

@@ -15,7 +15,7 @@ from rclpy.executors import ExternalShutdownException
 from manus_ros2_msgs.msg import ManusGlove
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float32MultiArray
 
 from .mapping import clamp_u8
 from .manus_landmarks import (
@@ -28,6 +28,7 @@ from .retarget_pipeline import (
     HandFeatures,
     HandRetargetTargets,
     L20CommandAdapter,
+    TactileForceHold,
     compute_landmark_flexion_targets,
     extract_hand_features,
     filter_l20_command,
@@ -134,6 +135,14 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("max_delta_per_cycle", 8)
         self.declare_parameter("lowpass_alpha", 0.45)
         self.declare_parameter("watchdog_timeout_sec", 0.3)
+        self.declare_parameter("enable_force_hold", False)
+        self.declare_parameter("force_topic", "/manus_l20_haptics/force")
+        self.declare_parameter("state_topic", "/cb_right_hand_state")
+        self.declare_parameter("force_hold_threshold", 5.0)
+        self.declare_parameter("force_hold_contact_samples", 2)
+        self.declare_parameter("force_hold_release_delta", 0.05)
+        self.declare_parameter("force_hold_feedback_timeout_sec", 0.1)
+        self.declare_parameter("force_hold_state_timeout_sec", 0.1)
         self.declare_parameter("reserved_command", 255)
         self.declare_parameter("start_from_open", True)
         self.declare_parameter("neutral_command", STANDARD_OPEN_COMMAND)
@@ -197,6 +206,8 @@ class ManusL20RetargetNode(Node):
         self._lock = threading.Lock()
         self._latest_msg: ManusGlove | None = None
         self._last_msg_time: float | None = None
+        self._latest_hand_state: list[int] | None = None
+        self._last_hand_state_time: float | None = None
         self._last_command: list[int] | None = None
         self._last_thumb_calibrated_command: dict[int, int] | None = None
         self._last_thumb_ik_debug_time = 0.0
@@ -226,6 +237,17 @@ class ManusL20RetargetNode(Node):
             self.get_parameter("closed_command").value,
             STANDARD_FIST_COMMAND,
         )
+        self._force_hold = None
+        self._force_hold_state_timeout = float(self.get_parameter("force_hold_state_timeout_sec").value)
+        if bool(self.get_parameter("enable_force_hold").value):
+            self._force_hold = TactileForceHold(
+                neutral_command=self._neutral_command,
+                closed_command=self._closed_command,
+                force_threshold=self.get_parameter("force_hold_threshold").value,
+                contact_samples=self.get_parameter("force_hold_contact_samples").value,
+                release_delta=self.get_parameter("force_hold_release_delta").value,
+                feedback_timeout_sec=self.get_parameter("force_hold_feedback_timeout_sec").value,
+            )
         self._lock_neutral_slots = _index_list_parameter(
             self.get_parameter("lock_neutral_slots").value,
             [5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
@@ -402,6 +424,9 @@ class ManusL20RetargetNode(Node):
         self._command_pub = self.create_publisher(JointState, self.get_parameter("command_topic").value, 10)
         self.create_subscription(ManusGlove, self.get_parameter("input_topic").value, self._on_glove, 1)
         self.create_subscription(Bool, "/l20/estop", self._on_estop, 1)
+        if self._force_hold is not None:
+            self.create_subscription(Float32MultiArray, self.get_parameter("force_topic").value, self._on_force, 1)
+            self.create_subscription(JointState, self.get_parameter("state_topic").value, self._on_hand_state, 1)
 
         publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
         self.create_timer(1.0 / max(publish_rate_hz, 1.0), self._on_timer)
@@ -703,8 +728,20 @@ class ManusL20RetargetNode(Node):
     def _on_estop(self, msg: Bool) -> None:
         self._estop = bool(msg.data)
         if self._estop:
+            if self._force_hold is not None:
+                self._force_hold.reset()
             self._last_command = list(self._neutral_command)
             self._publish(self._last_command)
+
+    def _on_force(self, msg: Float32MultiArray) -> None:
+        if self._force_hold is not None:
+            self._force_hold.update_force(list(msg.data[:5]), now=monotonic())
+
+    def _on_hand_state(self, msg: JointState) -> None:
+        if len(msg.position) == 20:
+            with self._lock:
+                self._latest_hand_state = [clamp_u8(value) for value in msg.position]
+                self._last_hand_state_time = monotonic()
 
     def _on_timer(self) -> None:
         with self._lock:
@@ -718,7 +755,10 @@ class ManusL20RetargetNode(Node):
         if msg is None:
             return
         if last_msg_time is not None and monotonic() - last_msg_time > self._watchdog_timeout:
-            self._last_command = self._filter_command(self._neutral_command)
+            self._last_command = self._apply_force_hold(
+                self._neutral_command,
+                self._filter_command(self._neutral_command),
+            )
             self._publish(self._last_command)
             return
 
@@ -729,9 +769,28 @@ class ManusL20RetargetNode(Node):
             return
 
         filtered_command = self._filter_command(command)
+        filtered_command = self._apply_force_hold(command, filtered_command)
         self._debug_thumb_segment_publish(command, filtered_command)
         self._last_command = filtered_command
         self._publish(self._last_command)
+
+    def _apply_force_hold(self, requested_command: list[int], candidate_command: list[int]) -> list[int]:
+        if self._force_hold is None:
+            return candidate_command
+        now = monotonic()
+        with self._lock:
+            hand_state = self._latest_hand_state
+            hand_state_time = self._last_hand_state_time
+        hold_command = self._last_command or self._neutral_command
+        if hand_state is not None and hand_state_time is not None and now - hand_state_time <= self._force_hold_state_timeout:
+            hold_command = hand_state
+        return self._force_hold.apply(
+            requested_command,
+            candidate_command,
+            self._last_command or self._neutral_command,
+            now=now,
+            hold_command=hold_command,
+        )
 
     def _thumb_segment_open_vector_parameter(self, inline_value: Any, path_value: str) -> np.ndarray | None:
         inline_vector = _optional_vector3_parameter(inline_value)

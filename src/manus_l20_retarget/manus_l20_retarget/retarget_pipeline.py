@@ -12,6 +12,13 @@ from .mapping import clamp_u8
 
 
 COMMAND_LENGTH = 20
+FINGER_CONTROL_SLOTS = (
+    (0, 5, 10, 15),
+    (1, 6, 16),
+    (2, 7, 17),
+    (3, 8, 18),
+    (4, 9, 19),
+)
 FINGER_LANDMARKS = (
     (1, 2, 3, 4),
     (5, 6, 7, 8),
@@ -96,6 +103,94 @@ class L20CommandAdapter:
     def apply_neutral_locks(self, command: list[int]) -> None:
         for index in self.lock_neutral_slots:
             command[index] = self.neutral_command[index]
+
+
+class TactileForceHold:
+    """Latch each finger at contact; deliberate opening always wins."""
+
+    def __init__(
+        self,
+        *,
+        neutral_command: list[int],
+        closed_command: list[int],
+        force_threshold: float,
+        contact_samples: int,
+        release_delta: float,
+        feedback_timeout_sec: float,
+    ) -> None:
+        self.neutral_command = list(neutral_command)
+        self.closed_command = list(closed_command)
+        self.force_threshold = max(0.0, float(force_threshold))
+        self.contact_samples = max(1, int(contact_samples))
+        self.release_delta = max(0.0, min(1.0, float(release_delta)))
+        self.feedback_timeout_sec = max(0.001, float(feedback_timeout_sec))
+        self._force_times: list[float | None] = [None] * 5
+        self._contact_counts = [0] * 5
+        self._held_commands: list[list[int] | None] = [None] * 5
+
+    def reset(self) -> None:
+        self._force_times = [None] * 5
+        self._contact_counts = [0] * 5
+        self._held_commands = [None] * 5
+
+    def update_force(self, normal_force: list[float], *, now: float) -> None:
+        for finger_index in range(5):
+            try:
+                value = float(normal_force[finger_index])
+            except (IndexError, TypeError, ValueError):
+                value = float("nan")
+            if not math.isfinite(value) or value < 0.0:
+                self._force_times[finger_index] = None
+                self._contact_counts[finger_index] = 0
+            else:
+                self._force_times[finger_index] = float(now)
+                self._contact_counts[finger_index] = (
+                    self._contact_counts[finger_index] + 1 if value >= self.force_threshold else 0
+                )
+
+    def apply(
+        self,
+        requested_command: list[int],
+        candidate_command: list[int],
+        current_command: list[int],
+        *,
+        now: float,
+        hold_command: list[int],
+    ) -> list[int]:
+        output = list(candidate_command)
+        for finger_index, slots in enumerate(FINGER_CONTROL_SLOTS):
+            requested = self._closure_progress(requested_command, finger_index)
+            current = self._closure_progress(current_command, finger_index)
+            held = self._held_commands[finger_index]
+            if held is not None:
+                if requested <= self._closure_progress(held, finger_index) - self.release_delta:
+                    self._held_commands[finger_index] = None
+                    self._contact_counts[finger_index] = 0
+                else:
+                    for slot in slots:
+                        output[slot] = held[slot]
+                    continue
+
+            opening = requested < current - self.release_delta
+            fresh = self._force_times[finger_index] is not None and now - self._force_times[finger_index] <= self.feedback_timeout_sec
+            if not fresh:
+                if not opening and requested > current:
+                    for slot in slots:
+                        output[slot] = current_command[slot]
+                continue
+            if not opening and self._contact_counts[finger_index] >= self.contact_samples:
+                self._held_commands[finger_index] = list(hold_command)
+                for slot in slots:
+                    output[slot] = hold_command[slot]
+        return output
+
+    def _closure_progress(self, command: list[int], finger_index: int) -> float:
+        values = []
+        for slot in (finger_index, 15 + finger_index):
+            span = float(self.closed_command[slot] - self.neutral_command[slot])
+            if abs(span) > 1e-6:
+                values.append(max(0.0, min(1.0, (command[slot] - self.neutral_command[slot]) / span)))
+        return sum(values) / len(values) if values else 0.0
 
 
 def extract_hand_features(
