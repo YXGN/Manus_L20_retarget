@@ -150,17 +150,16 @@ ros2 run manus_ros2 manus_data_publisher --ros-args \
 现在推荐使用 `calibration_capture all`。它把重复姿态融合后，只需要采 5 次姿势，同时生成四类 YAML：
 
 - `flexion_right/left_calibration.yaml`: 四指 root/tip 弯曲。
-- `finger_yaw_right/left_calibration.yaml`: 四指 yaw。
-- `finger_yaw_ergonomics_right/left_calibration.yaml`: 四指 yaw 的 ergonomics 方案；文件存在时双手启动会优先使用它。
+- `finger_yaw_ergonomics_right/left_calibration.yaml`: 四指 yaw 的 ergonomics 标定。
 - `thumb_right/left_flexion_mapping.yaml`: 拇指 root/tip 弯曲。
 - `thumb_segment_frame_right/left.yaml`: 拇指 segment IK 双姿态 frame。
 
 5 个姿势含义：
 
-- `natural_open`: 自然张开，同时作为四指 open、四指 yaw open、拇指弯曲 open、拇指 IK open。
+- `natural_open`: 自然张开，同时作为四指 open、四指 ergonomics yaw open、拇指弯曲 open、拇指 IK open。
 - `four_finger_fist`: 四指完全弯曲握拳，只用于四指弯曲 closed。
-- `finger_close`: 四指并拢，只用于四指 yaw close。
-- `finger_spread`: 四指外展，只用于四指 yaw spread。
+- `finger_close`: 四指并拢，只用于四指 ergonomics yaw close。
+- `finger_spread`: 四指外展，只用于四指 ergonomics yaw spread。
 - `thumb_pinky_root_touch`: 大拇指触碰小拇指指根，同时用于拇指弯曲 touch、拇指 IK touch。
 
 右手一键采集：
@@ -191,66 +190,7 @@ ros2 run manus_l20_retarget calibration_capture all \
 - `thumb_segment_frame_*.yaml` 里的 L20 `robot_open_command` / `robot_touch_command` 会优先保留已有文件里的值，不会因为重新采 MANUS 手势就覆盖手动调好的 L20 参考姿态。
 - `--hand left` 默认会使用 `left_glove_to_right_retarget`；右手默认使用 `right_glove_to_right_retarget`。
 - 采集时不需要启动 L20 真机，只需要 MANUS 数据话题正常发布。
-
-### 分项补采
-
-如果只想补采某一项，旧的分项命令仍然保留：
-
-- `calibration_capture flexion`: 只采四指弯曲 open/fist。
-- `calibration_capture finger-yaw`: 只采四指 yaw open/close/spread。
-- `calibration_capture ergonomics-yaw`: 只采四指 yaw 的 ergonomics open/close/spread。
-- `calibration_capture thumb-flexion`: 只采拇指弯曲 open/touch。
-- `calibration_capture thumb-frame`: 只采拇指 IK open/touch frame。
-
-```bash
-ros2 run manus_l20_retarget calibration_capture --help
-```
-
-### 四指 yaw 的 ergonomics 方案
-
-四指 yaw 原本可以从 raw skeleton / raw node orientation 里解算；这个方式在手指伸直时效果正常，但手指向握拳方向弯曲后，yaw 会被 flexion 污染，可能出现侧摆方向反掉的问题。
-
-当前新增了一个非侵入式 ergonomics yaw 方案：四指 root/tip 弯曲、拇指弯曲和拇指 IK 仍然按原方案运行，只把 L20 槽位 6-9 的四指 yaw 改成从 MANUS ergonomics 的 `IndexSpread`、`MiddleSpread`、`RingSpread`、`PinkySpread` 映射。
-
-双手 launch 的默认优先级：
-
-- 如果存在 `finger_yaw_ergonomics_right_calibration.yaml`，右手四指 yaw 使用 ergonomics。
-- 如果存在 `finger_yaw_ergonomics_left_calibration.yaml`，左手四指 yaw 使用 ergonomics。
-- 如果对应 ergonomics 文件不存在，会自动回退到 `finger_yaw_right/left_calibration.yaml`。
-
-右手 ergonomics yaw 单独补采：
-
-```bash
-source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Manus_L20_retarget
-source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
-
-ros2 run manus_l20_retarget calibration_capture ergonomics-yaw \
-  --glove-topic /manus_glove_0 \
-  --output /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/finger_yaw_ergonomics_right_calibration.yaml \
-  --duration 2.0
-```
-
-左手 ergonomics yaw 单独补采：
-
-```bash
-source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Manus_L20_retarget
-source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
-
-ros2 run manus_l20_retarget calibration_capture ergonomics-yaw \
-  --glove-topic /manus_glove_1 \
-  --output /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/finger_yaw_ergonomics_left_calibration.yaml \
-  --duration 2.0
-```
-
-采集姿势仍然是三组：
-
-- `natural_open`: 手指自然张开。
-- `finger_close`: 四指并拢。
-- `finger_spread`: 四指外展。
-
-如果需要临时回退旧 yaw 方案，可以删除或改名对应的 `finger_yaw_ergonomics_*_calibration.yaml`，也可以在 launch 时显式传入旧文件路径。
+- 四指 yaw 固定由 MANUS ergonomics 的 `IndexSpread`、`MiddleSpread`、`RingSpread`、`PinkySpread` 映射到 L20 槽位 6-9；其三组姿势已经包含在一键采集流程中。
 
 采集完成后确认 YAML 文件存在：
 

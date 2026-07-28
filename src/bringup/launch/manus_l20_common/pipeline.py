@@ -59,10 +59,7 @@ def _finger_yaw_ergonomics_config_name(hand_type: str) -> str:
 
 
 def _finger_yaw_calibration_file(hand_type: str) -> str:
-    ergonomics_path = Path(_config_file(_finger_yaw_ergonomics_config_name(hand_type)))
-    if ergonomics_path.exists():
-        return str(ergonomics_path)
-    return _config_file(_finger_yaw_config_name(hand_type))
+    return _config_file(_finger_yaw_ergonomics_config_name(hand_type))
 
 
 def _thumb_flexion_config_name(hand_type: str) -> str:
@@ -249,7 +246,7 @@ def _hand_actions(
                 {
                     "enabled": True,
                     "mock": mock_tactile,
-                    "hand_joint": "L20",
+                    "hand_joint": "G20",
                     "hand_type": hand_type,
                     "can_channel": can,
                     "poll_rate_hz": haptic_poll_rate_hz,
