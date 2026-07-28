@@ -47,12 +47,12 @@ command:
   - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
 samples:
   thumb_pinky_root_touch:
-    root_rad: 0.451129
-    tip_rad: 0.87109
-    root_signed_rad: 0.451129
-    tip_signed_rad: 0.87109
+    root_rad: 1.111178
+    tip_rad: 1.015586
+    root_signed_rad: 1.111178
+    tip_signed_rad: 1.015586
   thumb_natural_open:
-    root_rad: 0.000243
+    root_rad: 0.0
     tip_rad: 0.0
-    root_signed_rad: 0.000243
-    tip_signed_rad: -0.036129
+    root_signed_rad: -0.002029
+    tip_signed_rad: -0.549795

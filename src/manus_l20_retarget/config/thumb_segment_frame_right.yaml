@@ -2,13 +2,13 @@ schema: manus_l20.thumb_segment_frame.v1
 segment_start: 2
 segment_end: 3
 manus_open_vector:
-- -0.023512
-- 0.019675
-- 0.009883
+- -0.022123
+- 0.031644
+- 0.006292
 manus_touch_vector:
-- 0.012603
-- 0.02854
-- 0.008014
+- 0.027155
+- 0.027836
+- 0.004188
 robot_open_command:
 - 254      # 0  Thumb Base / 拇指根部弯曲
 - 248      # 1  Index Finger Base / 食指根部弯曲
