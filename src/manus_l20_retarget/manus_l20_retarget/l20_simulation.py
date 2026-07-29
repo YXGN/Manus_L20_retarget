@@ -13,14 +13,8 @@ import yaml
 from manus_ros2_msgs.msg import ManusGlove
 from rclpy.node import Node
 
-from .manus_landmarks import (
-    _finger_joint_orientation_yaw_rad,
-    _finger_mcp_orientation_yaw_rad,
-    _finger_yaw_rad,
-    manus_raw_nodes_to_mediapipe_landmarks,
-)
+from .manus_landmarks import manus_raw_nodes_to_mediapipe_landmarks
 from .manus_l20_retarget_node import (
-    DEFAULT_FINGER_YAW_OPEN_RAD,
     DEFAULT_ROOT_CLOSED_RAD,
     DEFAULT_ROOT_OPEN_RAD,
     DEFAULT_TIP_CLOSED_RAD,
@@ -71,8 +65,6 @@ class L20SimulationNode(Node):
         self._tip_closed_rad = list(DEFAULT_TIP_CLOSED_RAD)
         self._root_flexion_direction_sign: list[float] | None = None
         self._tip_flexion_direction_sign: list[float] | None = None
-        self._finger_yaw_source = str(args.finger_yaw_source)
-        self._finger_yaw_open_rad = list(DEFAULT_FINGER_YAW_OPEN_RAD)
         self._finger_yaw_mapping: dict[str, Any] | None = None
         self._thumb_segment_robot_open_command = _command_parameter(
             args.thumb_segment_robot_open_command,
@@ -210,24 +202,25 @@ class L20SimulationNode(Node):
         open_command = _command_parameter(command_data.get("natural_open_command"), self._neutral_command)
         close_command = _command_parameter(command_data.get("finger_close_command"), self._neutral_command)
         spread_command = _command_parameter(command_data.get("finger_spread_command"), self._neutral_command)
-        source = str(data.get("source", self._finger_yaw_source)).strip().lower()
-        if source not in (
-            "pip",
-            "dip",
-            "tip",
-            "mcp_orientation",
-            "pip_orientation",
-            "ip_orientation",
-            "dip_orientation",
-        ):
-            self.get_logger().warning(f"unknown visual finger yaw source={source!r}; using {self._finger_yaw_source!r}")
-            source = self._finger_yaw_source
+        source = str(data.get("source", "")).strip().lower()
+        if source != "ergonomics":
+            self.get_logger().warning(
+                f"visual finger yaw source={source!r} is no longer supported; "
+                "use an ergonomics yaw calibration file"
+            )
+            return
+        ergonomics_keys = data.get("ergonomics_keys")
+        if not isinstance(ergonomics_keys, list) or len(ergonomics_keys) != 4:
+            self.get_logger().warning(f"visual finger yaw ergonomics calibration missing four ergonomics_keys: {path}")
+            return
+        ergonomics_keys = [str(key) for key in ergonomics_keys]
         try:
             self._finger_yaw_mapping = {
                 "source": source,
-                "open_rad": _float_list_parameter(open_sample.get("yaw_rad"), self._finger_yaw_open_rad, length=4),
-                "close_rad": _float_list_parameter(close_sample.get("yaw_rad"), self._finger_yaw_open_rad, length=4),
-                "spread_rad": _float_list_parameter(spread_sample.get("yaw_rad"), self._finger_yaw_open_rad, length=4),
+                "ergonomics_keys": ergonomics_keys,
+                "open_rad": _float_list_parameter(open_sample.get("yaw_rad"), [0.0] * 4, length=4),
+                "close_rad": _float_list_parameter(close_sample.get("yaw_rad"), [0.0] * 4, length=4),
+                "spread_rad": _float_list_parameter(spread_sample.get("yaw_rad"), [0.0] * 4, length=4),
                 "open_cmd": [open_command[slot] for slot in range(6, 10)],
                 "close_cmd": [close_command[slot] for slot in range(6, 10)],
                 "spread_cmd": [spread_command[slot] for slot in range(6, 10)],
@@ -239,6 +232,7 @@ class L20SimulationNode(Node):
         self.get_logger().info(
             "loaded visual finger yaw calibration "
             f"path={path}, source={source}, "
+            f"ergonomics_keys={ergonomics_keys}, "
             f"open_cmd={self._finger_yaw_mapping['open_cmd']}, "
             f"close_cmd={self._finger_yaw_mapping['close_cmd']}, "
             f"spread_cmd={self._finger_yaw_mapping['spread_cmd']}"
@@ -479,10 +473,9 @@ class L20SimulationNode(Node):
         landmarks = manus_raw_nodes_to_mediapipe_landmarks(
             msg.raw_nodes,
             transform=self._args.transform,
-            wrist_mode=self._args.wrist_mode,
-            distal_mode=self._args.distal_mode,
         )
-        base_command = self._base_command(landmarks, msg.raw_nodes)
+        ergonomics = {str(entry.type): float(entry.value) for entry in msg.ergonomics if entry.type}
+        base_command = self._base_command(landmarks, ergonomics)
         base_qpos = self._adapter.sdk_range_to_qpos(base_command)
         target_vector = self._thumb_segment_target_vector(landmarks)
         raw_qpos = self._thumb_segment_ik.solve_target(
@@ -543,12 +536,12 @@ class L20SimulationNode(Node):
                 f"base_thumb={[base_command[index] for index in THUMB_COMMAND_SLOTS]}"
             )
 
-    def _base_command(self, landmarks: np.ndarray, raw_nodes: list[Any] | None = None) -> list[int]:
+    def _base_command(self, landmarks: np.ndarray, ergonomics: dict[str, float]) -> list[int]:
         command = list(self._neutral_command)
         if self._args.show_fingers:
             self._apply_visual_finger_flexion(command, landmarks)
             if self._args.finger_yaw:
-                self._apply_visual_finger_yaw(command, landmarks, raw_nodes)
+                self._apply_visual_finger_yaw(command, ergonomics)
 
         mapping = self._thumb_flexion_mapping
         if mapping is None:
@@ -628,28 +621,18 @@ class L20SimulationNode(Node):
     def _apply_visual_finger_yaw(
         self,
         command: list[int],
-        landmarks: np.ndarray,
-        raw_nodes: list[Any] | None,
+        ergonomics: dict[str, float],
     ) -> None:
         mapping = self._finger_yaw_mapping
         if mapping is None:
             return
-        source = str(mapping["source"])
-        if source == "mcp_orientation":
-            if raw_nodes is None:
-                return
-            yaw_angles = _finger_mcp_orientation_yaw_rad(raw_nodes)
-        elif source in ("pip_orientation", "ip_orientation", "dip_orientation"):
-            if raw_nodes is None:
-                return
-            joint_type = {
-                "pip_orientation": "PIP",
-                "ip_orientation": "IP",
-                "dip_orientation": "DIP",
-            }[source]
-            yaw_angles = _finger_joint_orientation_yaw_rad(raw_nodes, joint_type=joint_type)
-        else:
-            yaw_angles = _finger_yaw_rad(landmarks, source=source)
+        keys = mapping.get("ergonomics_keys") or []
+        if len(keys) != 4:
+            return
+        try:
+            yaw_angles = np.asarray([float(ergonomics[str(key)]) for key in keys], dtype=np.float64)
+        except (KeyError, TypeError, ValueError):
+            return
 
         open_rad = mapping["open_rad"]
         close_rad = mapping["close_rad"]
@@ -793,8 +776,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--interval", type=float, default=0.5)
     parser.add_argument("--mode", choices=("segment",), default="segment", help=argparse.SUPPRESS)
     parser.add_argument("--transform", default="right_glove_to_right_retarget")
-    parser.add_argument("--wrist-mode", default="estimate", choices=("estimate", "palm_center"))
-    parser.add_argument("--distal-mode", default="dip", choices=("dip", "ip"))
     parser.add_argument("--l20-thumb-ik-root", default=str(thumb_ik_root))
     parser.add_argument(
         "--config",
@@ -808,8 +789,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--thumb-debug", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--flexion-calibration-path", default="")
     parser.add_argument("--finger-yaw", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--finger-yaw-calibration-path", default="")
-    parser.add_argument("--finger-yaw-source", default="tip")
+    parser.add_argument(
+        "--finger-yaw-calibration-path",
+        default=str(retarget_config / "finger_yaw_ergonomics_right_calibration.yaml"),
+    )
     parser.add_argument(
         "--thumb-flexion-mapping-path",
         default=str(retarget_config / "thumb_right_flexion_mapping.yaml"),

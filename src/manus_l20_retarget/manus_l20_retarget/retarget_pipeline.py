@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Any
-
 import numpy as np
 from manus_ros2_msgs.msg import ManusGlove
 
@@ -48,16 +46,11 @@ class HandFeatures:
     """MANUS frame data normalized for the retarget pipeline."""
 
     landmarks: np.ndarray
-    raw_nodes: list[Any]
-    hand_side: str
     ergonomics: dict[str, float]
 
 
 @dataclass(slots=True)
 class FingerFlexionTarget:
-    finger_index: int
-    root_angle_rad: float
-    tip_angle_rad: float
     root_amount: float
     tip_amount: float
 
@@ -102,25 +95,14 @@ def extract_hand_features(
     msg: ManusGlove,
     *,
     landmark_transform: str,
-    wrist_mode: str,
-    distal_mode: str,
-    hand_side_override: str,
 ) -> HandFeatures:
     landmarks = manus_raw_nodes_to_mediapipe_landmarks(
         msg.raw_nodes,
         transform=landmark_transform,
-        wrist_mode=wrist_mode,
-        distal_mode=distal_mode,
     )
-    if hand_side_override == "auto":
-        hand_side = "right" if str(msg.side).lower() != "left" else "left"
-    else:
-        hand_side = hand_side_override
     ergonomics = {entry.type: float(entry.value) for entry in msg.ergonomics if entry.type}
     return HandFeatures(
         landmarks=landmarks,
-        raw_nodes=list(msg.raw_nodes),
-        hand_side=hand_side,
         ergonomics=ergonomics,
     )
 
@@ -132,8 +114,8 @@ def compute_landmark_flexion_targets(
     root_closed_rad: list[float],
     tip_open_rad: list[float],
     tip_closed_rad: list[float],
-    root_direction_sign: list[float] | None = None,
-    tip_direction_sign: list[float] | None = None,
+    root_direction_sign: list[float],
+    tip_direction_sign: list[float],
     root_gamma: float,
     tip_gamma: float,
     open_straightness_threshold: float,
@@ -143,20 +125,14 @@ def compute_landmark_flexion_targets(
     for finger_index, (mcp, pip, dip, tip) in enumerate(FINGER_LANDMARKS):
         if finger_index == 0:
             continue
-        if root_direction_sign is None:
-            root_angle = _joint_flexion_rad(landmarks[mcp], landmarks[pip], landmarks[dip])
-        else:
-            root_angle = _directed_finger_flexion_rad(landmarks, finger_index, root=True) * float(
-                root_direction_sign[finger_index]
-            )
-            root_angle = max(0.0, root_angle)
-        if tip_direction_sign is None:
-            tip_angle = _joint_flexion_rad(landmarks[pip], landmarks[dip], landmarks[tip])
-        else:
-            tip_angle = _directed_finger_flexion_rad(landmarks, finger_index, root=False) * float(
-                tip_direction_sign[finger_index]
-            )
-            tip_angle = max(0.0, tip_angle)
+        root_angle = _directed_finger_flexion_rad(landmarks, finger_index, root=True) * float(
+            root_direction_sign[finger_index]
+        )
+        root_angle = max(0.0, root_angle)
+        tip_angle = _directed_finger_flexion_rad(landmarks, finger_index, root=False) * float(
+            tip_direction_sign[finger_index]
+        )
+        tip_angle = max(0.0, tip_angle)
         root_amount = _normalized_angle(
             root_angle,
             root_open_rad[finger_index],
@@ -188,9 +164,6 @@ def compute_landmark_flexion_targets(
             open_straightness_threshold,
         )
         finger_targets[finger_index] = FingerFlexionTarget(
-            finger_index=finger_index,
-            root_angle_rad=root_angle,
-            tip_angle_rad=tip_angle,
             root_amount=root_amount,
             tip_amount=tip_amount,
         )
