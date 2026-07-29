@@ -101,6 +101,7 @@ DEFAULT_ROOT_OPEN_RAD = [0.00814, 0.21187, 0.22807, 0.17647, 0.19789]
 DEFAULT_ROOT_CLOSED_RAD = [0.75, 2.00, 2.05, 2.00, 1.80]
 DEFAULT_TIP_OPEN_RAD = [0.19885, 0.03296, 0.06118, 0.21235, 0.12662]
 DEFAULT_TIP_CLOSED_RAD = [0.80, 1.30, 1.80, 1.50, 1.70]
+DEFAULT_FLEXION_DIRECTION_SIGN = [1.0, -1.0, -1.0, -1.0, -1.0]
 THUMB_COMMAND_SLOTS = (0, 5, 10, 15)
 THUMB_IK_COMMAND_SLOTS = (5, 10)
 
@@ -117,7 +118,6 @@ class ManusL20RetargetNode(Node):
 
         self.declare_parameter("input_topic", "/manus_glove_0")
         self.declare_parameter("command_topic", "/cb_right_hand_control_cmd")
-        self.declare_parameter("hand_side", "auto")
         self.declare_parameter("l20_thumb_ik_root", str(default_thumb_ik_root))
         self.declare_parameter("l20_thumb_ik_config_path", str(default_config))
         self.declare_parameter("linkerhand_sdk_root", str(default_sdk_root))
@@ -162,8 +162,6 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("thumb_segment_yaw_progress_gate_start", 0.0)
         self.declare_parameter("thumb_segment_yaw_progress_gate_end", 0.0)
         self.declare_parameter("landmark_transform", "right_glove_to_right_retarget")
-        self.declare_parameter("wrist_mode", "estimate")
-        self.declare_parameter("distal_mode", "dip")
         self.declare_parameter("flexion_open_straightness_threshold", 0.985)
         self.declare_parameter("flexion_open_angle_deadband_rad", 0.2)
 
@@ -179,12 +177,6 @@ class ManusL20RetargetNode(Node):
         ).expanduser().resolve()
         self._linkerhand_sdk_root = Path(str(self.get_parameter("linkerhand_sdk_root").value)).expanduser().resolve()
         self._hand_family = str(self.get_parameter("hand_family").value).upper()
-        self._hand_side_override = str(self.get_parameter("hand_side").value).strip().lower()
-        if self._hand_side_override not in ("auto", "left", "right"):
-            self.get_logger().warning(
-                f"unknown hand_side={self._hand_side_override!r}; using 'auto'"
-            )
-            self._hand_side_override = "auto"
         self._max_delta = int(self.get_parameter("max_delta_per_cycle").value)
         self._alpha = float(self.get_parameter("lowpass_alpha").value)
         self._watchdog_timeout = float(self.get_parameter("watchdog_timeout_sec").value)
@@ -205,8 +197,8 @@ class ManusL20RetargetNode(Node):
         self._finger_yaw_mapping: dict[str, Any] | None = None
         self._lock_neutral_slots = [index for index in self._lock_neutral_slots if index not in (0, 5, 10, 15)]
         self._thumb_flexion_mapping: dict[str, Any] | None = None
-        self._root_flexion_direction_sign: list[float] | None = None
-        self._tip_flexion_direction_sign: list[float] | None = None
+        self._root_flexion_direction_sign = list(DEFAULT_FLEXION_DIRECTION_SIGN)
+        self._tip_flexion_direction_sign = list(DEFAULT_FLEXION_DIRECTION_SIGN)
         self._thumb_flexion_root_gamma = max(
             0.05,
             float(self.get_parameter("thumb_flexion_root_gamma").value),
@@ -362,26 +354,15 @@ class ManusL20RetargetNode(Node):
             self._tip_closed_rad,
             length=5,
         )
-        samples = data.get("samples")
-        open_sample = samples.get("open") if isinstance(samples, dict) else None
-        fist_sample = samples.get("four_finger_fist") if isinstance(samples, dict) else None
-        has_signed_samples = (
-            isinstance(open_sample, dict)
-            and isinstance(fist_sample, dict)
-            and "root_signed_rad" in open_sample
-            and "root_signed_rad" in fist_sample
-            and "tip_signed_rad" in open_sample
-            and "tip_signed_rad" in fist_sample
+        self._root_flexion_direction_sign = _float_list_parameter(
+            data.get("root_flexion_direction_sign"),
+            DEFAULT_FLEXION_DIRECTION_SIGN,
+            length=5,
         )
-        self._root_flexion_direction_sign = (
-            _float_list_parameter(data.get("root_flexion_direction_sign"), [1.0] * 5, length=5)
-            if has_signed_samples and data.get("root_flexion_direction_sign") is not None
-            else None
-        )
-        self._tip_flexion_direction_sign = (
-            _float_list_parameter(data.get("tip_flexion_direction_sign"), [1.0] * 5, length=5)
-            if has_signed_samples and data.get("tip_flexion_direction_sign") is not None
-            else None
+        self._tip_flexion_direction_sign = _float_list_parameter(
+            data.get("tip_flexion_direction_sign"),
+            DEFAULT_FLEXION_DIRECTION_SIGN,
+            length=5,
         )
         self._apply_flexion_command_calibration(data.get("command"))
         self.get_logger().info(
@@ -707,9 +688,6 @@ class ManusL20RetargetNode(Node):
         features = extract_hand_features(
             msg,
             landmark_transform=str(self.get_parameter("landmark_transform").value),
-            wrist_mode=str(self.get_parameter("wrist_mode").value),
-            distal_mode=str(self.get_parameter("distal_mode").value),
-            hand_side_override=self._hand_side_override,
         )
         return self._command_from_landmark_flexion(features)
 
@@ -1013,9 +991,6 @@ class ManusL20RetargetNode(Node):
         if self._thumb_segment_frame_rotation is None:
             raise RuntimeError("thumb segment frame rotation was not initialized")
         return self._thumb_segment_frame_rotation @ vector
-
-    def _apply_neutral_locks(self, command: list[int]) -> None:
-        self._l20_command_adapter.apply_neutral_locks(command)
 
     def _filter_command(self, command: list[int]) -> list[int]:
         return filter_l20_command(
@@ -1479,6 +1454,32 @@ def _unit_vector(vector: np.ndarray) -> np.ndarray | None:
     if norm <= 1e-8:
         return None
     return vector / norm
+
+
+def _rotation_between(source: np.ndarray, target: np.ndarray) -> np.ndarray:
+    source = np.asarray(source, dtype=np.float64)
+    target = np.asarray(target, dtype=np.float64)
+    source = source / max(float(np.linalg.norm(source)), 1e-8)
+    target = target / max(float(np.linalg.norm(target)), 1e-8)
+    cross = np.cross(source, target)
+    dot = float(np.dot(source, target))
+    if dot > 1.0 - 1e-8:
+        return np.eye(3, dtype=np.float64)
+    if dot < -1.0 + 1e-8:
+        axis = np.cross(source, np.asarray([1.0, 0.0, 0.0], dtype=np.float64))
+        if float(np.linalg.norm(axis)) <= 1e-8:
+            axis = np.cross(source, np.asarray([0.0, 1.0, 0.0], dtype=np.float64))
+        axis = axis / max(float(np.linalg.norm(axis)), 1e-8)
+        return _axis_angle_rotation(axis, math.pi)
+    skew = np.asarray(
+        [
+            [0.0, -cross[2], cross[1]],
+            [cross[2], 0.0, -cross[0]],
+            [-cross[1], cross[0], 0.0],
+        ],
+        dtype=np.float64,
+    )
+    return np.eye(3, dtype=np.float64) + skew + skew @ skew * (1.0 / (1.0 + dot))
 
 
 def _frame_rotation_from_two_vectors(
