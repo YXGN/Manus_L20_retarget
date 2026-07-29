@@ -147,11 +147,11 @@ ros2 run manus_ros2 manus_data_publisher --ros-args \
 
 ### 推荐：一键合并采集
 
-现在推荐使用 `calibration_capture all`。它把重复姿态融合后，只需要采 5 次姿势，同时生成四类 YAML：
+现在推荐使用 `calibration_capture all`。它把重复姿态融合后，只需要采 5 次姿势，同时生成四类当前运行时使用的 YAML：
 
-- `flexion_right/left_calibration.yaml`: 四指 root/tip 弯曲。
+- `finger_flexion_ergonomics_right/left_calibration.yaml`: 四指 root/tip 的 ergonomics 弯曲标定。
 - `finger_yaw_ergonomics_right/left_calibration.yaml`: 四指 yaw 的 ergonomics 标定。
-- `thumb_right/left_flexion_mapping.yaml`: 拇指 root/tip 弯曲。
+- `thumb_right/left_flexion_ergonomics_mapping.yaml`: 拇指 root/tip 的 ergonomics 弯曲标定。
 - `thumb_segment_frame_right/left.yaml`: 拇指 segment IK 双姿态 frame。
 
 5 个姿势含义：
@@ -191,12 +191,13 @@ ros2 run manus_l20_retarget calibration_capture all \
 - `--hand left` 默认会使用 `left_glove_to_right_retarget`；右手默认使用 `right_glove_to_right_retarget`。
 - 采集时不需要启动 L20 真机，只需要 MANUS 数据话题正常发布。
 - 四指 yaw 固定由 MANUS ergonomics 的 `IndexSpread`、`MiddleSpread`、`RingSpread`、`PinkySpread` 映射到 L20 槽位 6-9；其三组姿势已经包含在一键采集流程中。
+- 四指和拇指 root/tip 弯曲固定使用 ergonomics 标定，不再回退到旧的骨骼几何弯曲路径。
 
 采集完成后确认 YAML 文件存在：
 
 ```bash
-ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/*_calibration.yaml
-ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/thumb_*_flexion_mapping.yaml
+ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/finger_*_ergonomics_*_calibration.yaml
+ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/thumb_*_flexion_ergonomics_mapping.yaml
 ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/thumb_segment_frame_*.yaml
 ```
 

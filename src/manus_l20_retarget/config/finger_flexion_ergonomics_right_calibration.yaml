@@ -1,46 +1,24 @@
-schema: manus_l20.flexion_calibration.v1
+schema: manus_l20.finger_flexion_ergonomics.v1
 finger_order:
-- thumb
 - index
 - middle
 - ring
 - pinky
-root_flexion_open_rad:
-- 0.0
-- 0.0
-- 0.0
-- 0.0
-- 0.0
-root_flexion_closed_rad:
-- 0.0
-- 1.762005
-- 1.838204
-- 1.722857
-- 1.391095
-tip_flexion_open_rad:
-- 0.0
-- 0.0
-- 0.0
-- 0.0
-- 0.0
-tip_flexion_closed_rad:
-- 0.0
-- 1.639791
-- 2.040049
-- 2.149717
-- 1.552807
-root_flexion_direction_sign:
-- 1.0
-- -1.0
-- -1.0
-- -1.0
-- -1.0
-tip_flexion_direction_sign:
-- 1.0
-- -1.0
-- -1.0
-- -1.0
-- -1.0
+source: ergonomics
+root_ergonomics_keys:
+- IndexMCPStretch
+- MiddleMCPStretch
+- RingMCPStretch
+- PinkyMCPStretch
+tip_ergonomics_key_groups:
+- - IndexPIPStretch
+  - IndexDIPStretch
+- - MiddlePIPStretch
+  - MiddleDIPStretch
+- - RingPIPStretch
+  - RingDIPStretch
+- - PinkyPIPStretch
+  - PinkyDIPStretch
 command:
   open_command:
   - 160    # 0  Thumb Base / 拇指根部弯曲
@@ -85,53 +63,67 @@ command:
   - 2      # 18 Ring Finger Tip / 无名指指尖弯曲
   - 9      # 19 Pinky Finger Tip / 小指指尖弯曲
 samples:
-  open:
-    root_rad:
-    - 0.002029
-    - 0.195848
-    - 0.208451
-    - 0.264202
-    - 0.369655
-    tip_rad:
-    - 0.549795
-    - 0.290403
-    - 0.228458
-    - 0.199561
-    - 0.272344
-    root_signed_rad:
-    - -0.002029
-    - 0.195848
-    - 0.208451
-    - 0.264202
-    - 0.369655
-    tip_signed_rad:
-    - -0.549795
-    - 0.290403
-    - 0.228458
-    - 0.199561
-    - 0.272344
+  natural_open:
+    root_value:
+    - -0.145713
+    - 3.122668
+    - -3.933034
+    - 6.756591
+    tip_value:
+    - -16.584626
+    - -12.452678
+    - -12.572086
+    - -20.515947
+    ergonomics:
+      IndexDIPStretch: -16.454223
+      IndexMCPStretch: -0.145713
+      IndexPIPStretch: -0.130403
+      IndexSpread: 7.732419
+      MiddleDIPStretch: -12.400482
+      MiddleMCPStretch: 3.122668
+      MiddlePIPStretch: -0.052196
+      MiddleSpread: -2.852647
+      PinkyDIPStretch: -20.41513
+      PinkyMCPStretch: 6.756591
+      PinkyPIPStretch: -0.100817
+      PinkySpread: -30.854386
+      RingDIPStretch: -16.288951
+      RingMCPStretch: -3.933034
+      RingPIPStretch: 3.716865
+      RingSpread: -11.25127
+      ThumbDIPStretch: -20.716659
+      ThumbMCPSpread: 8.187078
+      ThumbMCPStretch: 47.221171
+      ThumbPIPStretch: -0.14025
   four_finger_fist:
-    root_rad:
-    - 0.197815
-    - 1.762005
-    - 1.838204
-    - 1.722857
-    - 1.391095
-    tip_rad:
-    - 0.082455
-    - 1.639791
-    - 2.040049
-    - 2.149717
-    - 1.552807
-    root_signed_rad:
-    - 0.197815
-    - -1.762005
-    - -1.838204
-    - -1.722857
-    - -1.391095
-    tip_signed_rad:
-    - -0.082455
-    - -1.639791
-    - -2.040049
-    - -2.149717
-    - -1.552807
+    root_value:
+    - 82.617053
+    - 82.040901
+    - 71.044466
+    - 68.9787
+    tip_value:
+    - 116.124148
+    - 148.895599
+    - 161.051846
+    - 111.777787
+    ergonomics:
+      IndexDIPStretch: 35.24554
+      IndexMCPStretch: 82.617053
+      IndexPIPStretch: 80.878608
+      IndexSpread: 3.839773
+      MiddleDIPStretch: 73.953382
+      MiddleMCPStretch: 82.040901
+      MiddlePIPStretch: 74.942217
+      MiddleSpread: 5.150618
+      PinkyDIPStretch: 49.143439
+      PinkyMCPStretch: 68.9787
+      PinkyPIPStretch: 62.634348
+      PinkySpread: -13.388955
+      RingDIPStretch: 77.376892
+      RingMCPStretch: 71.044466
+      RingPIPStretch: 83.674954
+      RingSpread: 2.368669
+      ThumbDIPStretch: -9.044326
+      ThumbMCPSpread: 6.380157
+      ThumbMCPStretch: 47.74042
+      ThumbPIPStretch: 5.26519

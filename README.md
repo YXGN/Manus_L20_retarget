@@ -9,12 +9,12 @@ MANUS glove -> manus_l20_retarget -> /cb_<hand>_hand_control_cmd
             -> linker_hand_advanced_g20 -> CAN -> L20
 ```
 
-- Four-finger root/tip: calibrated raw-skeleton flexion.
+- Four-finger root/tip: calibrated MANUS ergonomics flexion.
 - Four-finger yaw: calibrated MANUS ergonomics spread values.
-- Thumb root/tip: calibrated flexion mapping.
+- Thumb root/tip: calibrated MANUS ergonomics flexion.
 - Thumb roll/yaw: mandatory two-pose segment IK frame.
 
-Revo retargeting, raw/orientation yaw calibration, full-hand IK, direct thumb roll/yaw, and startup open-vector alignment are removed from the active path.
+Revo retargeting, geometric flexion calibration, raw/orientation yaw calibration, full-hand IK, direct thumb roll/yaw, and startup open-vector alignment are removed from the active path.
 
 ## Build
 
@@ -33,4 +33,4 @@ ros2 launch bringup manus_l20_linkerhand_g20_left.launch.py start_manus:=true ca
 ros2 launch bringup manus_l20_linkerhand_g20.launch.py start_manus:=true right_can:=can0 left_can:=can1
 ```
 
-See [CODE_STRUCTURE.md](CODE_STRUCTURE.md) for package ownership. The original detailed calibration procedure remains in `MANUS_L20_TELEOP_SOP.md` unchanged.
+See [CODE_STRUCTURE.md](CODE_STRUCTURE.md) for package ownership and `MANUS_L20_TELEOP_SOP.md` for the detailed calibration procedure.

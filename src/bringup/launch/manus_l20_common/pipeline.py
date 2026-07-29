@@ -42,8 +42,8 @@ def _thumb_segment_robot_open_command(hand_type: str) -> str:
     return "[254,248,246,249,254,128,115,111,131,188,221,255,255,255,255,254,254,254,254,254]"
 
 
-def _flexion_config_name(hand_type: str) -> str:
-    return "flexion_left_calibration.yaml" if hand_type == "left" else "flexion_right_calibration.yaml"
+def _finger_flexion_ergonomics_config_name(hand_type: str) -> str:
+    return f"finger_flexion_ergonomics_{hand_type}_calibration.yaml"
 
 
 def _finger_yaw_ergonomics_config_name(hand_type: str) -> str:
@@ -58,8 +58,8 @@ def _finger_yaw_calibration_file(hand_type: str) -> str:
     return _config_file(_finger_yaw_ergonomics_config_name(hand_type))
 
 
-def _thumb_flexion_config_name(hand_type: str) -> str:
-    return "thumb_left_flexion_mapping.yaml" if hand_type == "left" else "thumb_right_flexion_mapping.yaml"
+def _thumb_flexion_ergonomics_config_name(hand_type: str) -> str:
+    return f"thumb_{hand_type}_flexion_ergonomics_mapping.yaml"
 
 
 def _manus_calibration_file(hand_type: str) -> str:
@@ -89,12 +89,10 @@ def _hand_actions(
     root_gamma,
     tip_gamma,
     finger_yaw_calibration_path,
-    flexion_calibration_path,
-    thumb_flexion_mapping_path,
+    finger_flexion_ergonomics_calibration_path,
+    thumb_flexion_ergonomics_mapping_path,
     thumb_flexion_root_gamma,
     thumb_flexion_tip_gamma,
-    thumb_flexion_open_straightness_threshold,
-    thumb_flexion_open_angle_deadband_rad,
     thumb_ik_debug,
     thumb_segment_start,
     thumb_segment_end,
@@ -123,8 +121,6 @@ def _hand_actions(
     haptic_poll_rate_hz,
     haptic_read_mode,
     haptic_normal_force_full_scale,
-    flexion_open_straightness_threshold,
-    flexion_open_angle_deadband_rad,
 ):
     if hand_type not in {"left", "right"}:
         raise ValueError(f"hand_type must be left or right, got {hand_type!r}")
@@ -152,12 +148,10 @@ def _hand_actions(
                     "root_gamma": root_gamma,
                     "tip_gamma": tip_gamma,
                     "finger_yaw_calibration_path": finger_yaw_calibration_path,
-                    "flexion_calibration_path": flexion_calibration_path,
-                    "thumb_flexion_mapping_path": thumb_flexion_mapping_path,
+                    "finger_flexion_ergonomics_calibration_path": finger_flexion_ergonomics_calibration_path,
+                    "thumb_flexion_ergonomics_mapping_path": thumb_flexion_ergonomics_mapping_path,
                     "thumb_flexion_root_gamma": thumb_flexion_root_gamma,
                     "thumb_flexion_tip_gamma": thumb_flexion_tip_gamma,
-                    "thumb_flexion_open_straightness_threshold": thumb_flexion_open_straightness_threshold,
-                    "thumb_flexion_open_angle_deadband_rad": thumb_flexion_open_angle_deadband_rad,
                     "thumb_ik_debug": thumb_ik_debug,
                     "thumb_segment_start": thumb_segment_start,
                     "thumb_segment_end": thumb_segment_end,
@@ -175,8 +169,6 @@ def _hand_actions(
                     "thumb_segment_roll_progress_gate_end": thumb_segment_roll_progress_gate_end,
                     "thumb_segment_yaw_progress_gate_start": thumb_segment_yaw_progress_gate_start,
                     "thumb_segment_yaw_progress_gate_end": thumb_segment_yaw_progress_gate_end,
-                    "flexion_open_straightness_threshold": flexion_open_straightness_threshold,
-                    "flexion_open_angle_deadband_rad": flexion_open_angle_deadband_rad,
                 }
             ],
         ),
@@ -286,24 +278,20 @@ def generate_manus_l20_launch(
             DeclareLaunchArgument("landmark_transform", default_value=landmark_transform_default),
             DeclareLaunchArgument("root_gamma", default_value="0.2"),
             DeclareLaunchArgument("tip_gamma", default_value="1.0"),
-            DeclareLaunchArgument("flexion_open_straightness_threshold", default_value="0.985"),
-            DeclareLaunchArgument("flexion_open_angle_deadband_rad", default_value="0.2"),
             DeclareLaunchArgument(
                 "finger_yaw_calibration_path",
                 default_value=_finger_yaw_calibration_file(logic_type),
             ),
             DeclareLaunchArgument(
-                "flexion_calibration_path",
-                default_value=_config_file(_flexion_config_name(logic_type)),
+                "finger_flexion_ergonomics_calibration_path",
+                default_value=_config_file(_finger_flexion_ergonomics_config_name(logic_type)),
             ),
             DeclareLaunchArgument(
-                "thumb_flexion_mapping_path",
-                default_value=_config_file(_thumb_flexion_config_name(logic_type)),
+                "thumb_flexion_ergonomics_mapping_path",
+                default_value=_config_file(_thumb_flexion_ergonomics_config_name(logic_type)),
             ),
             DeclareLaunchArgument("thumb_flexion_root_gamma", default_value="1.0"),
             DeclareLaunchArgument("thumb_flexion_tip_gamma", default_value="1.0"),
-            DeclareLaunchArgument("thumb_flexion_open_straightness_threshold", default_value="0.0"),
-            DeclareLaunchArgument("thumb_flexion_open_angle_deadband_rad", default_value="0.0"),
             DeclareLaunchArgument("thumb_ik_debug", default_value="false"),
             DeclareLaunchArgument("thumb_segment_start", default_value="2"),
             DeclareLaunchArgument("thumb_segment_end", default_value="3"),
@@ -360,14 +348,14 @@ def generate_manus_l20_launch(
                 root_gamma=LaunchConfiguration("root_gamma"),
                 tip_gamma=LaunchConfiguration("tip_gamma"),
                 finger_yaw_calibration_path=LaunchConfiguration("finger_yaw_calibration_path"),
-                flexion_calibration_path=LaunchConfiguration("flexion_calibration_path"),
-                thumb_flexion_mapping_path=LaunchConfiguration("thumb_flexion_mapping_path"),
+                finger_flexion_ergonomics_calibration_path=LaunchConfiguration(
+                    "finger_flexion_ergonomics_calibration_path"
+                ),
+                thumb_flexion_ergonomics_mapping_path=LaunchConfiguration(
+                    "thumb_flexion_ergonomics_mapping_path"
+                ),
                 thumb_flexion_root_gamma=LaunchConfiguration("thumb_flexion_root_gamma"),
                 thumb_flexion_tip_gamma=LaunchConfiguration("thumb_flexion_tip_gamma"),
-                thumb_flexion_open_straightness_threshold=LaunchConfiguration(
-                    "thumb_flexion_open_straightness_threshold"
-                ),
-                thumb_flexion_open_angle_deadband_rad=LaunchConfiguration("thumb_flexion_open_angle_deadband_rad"),
                 thumb_ik_debug=LaunchConfiguration("thumb_ik_debug"),
                 thumb_segment_start=LaunchConfiguration("thumb_segment_start"),
                 thumb_segment_end=LaunchConfiguration("thumb_segment_end"),
@@ -396,8 +384,6 @@ def generate_manus_l20_launch(
                 haptic_poll_rate_hz=LaunchConfiguration("haptic_poll_rate_hz"),
                 haptic_read_mode=LaunchConfiguration("haptic_read_mode"),
                 haptic_normal_force_full_scale=LaunchConfiguration("haptic_normal_force_full_scale"),
-                flexion_open_straightness_threshold=LaunchConfiguration("flexion_open_straightness_threshold"),
-                flexion_open_angle_deadband_rad=LaunchConfiguration("flexion_open_angle_deadband_rad"),
             ),
             Node(
                 condition=IfCondition(LaunchConfiguration("start_manus")),
@@ -450,18 +436,29 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         DeclareLaunchArgument("left_landmark_transform", default_value="left_glove_to_right_retarget"),
         DeclareLaunchArgument("root_gamma", default_value="0.2"),
         DeclareLaunchArgument("tip_gamma", default_value="1.0"),
-        DeclareLaunchArgument("flexion_open_straightness_threshold", default_value="0.985"),
-        DeclareLaunchArgument("flexion_open_angle_deadband_rad", default_value="0.2"),
+        DeclareLaunchArgument(
+            "right_finger_flexion_ergonomics_calibration_path",
+            default_value=_config_file(_finger_flexion_ergonomics_config_name("right")),
+        ),
+        DeclareLaunchArgument(
+            "left_finger_flexion_ergonomics_calibration_path",
+            default_value=_config_file(_finger_flexion_ergonomics_config_name("left")),
+        ),
         DeclareLaunchArgument("right_finger_yaw_calibration_path", default_value=_finger_yaw_calibration_file("right")),
         DeclareLaunchArgument("left_finger_yaw_calibration_path", default_value=_finger_yaw_calibration_file("left")),
+        DeclareLaunchArgument(
+            "right_thumb_flexion_ergonomics_mapping_path",
+            default_value=_config_file(_thumb_flexion_ergonomics_config_name("right")),
+        ),
+        DeclareLaunchArgument(
+            "left_thumb_flexion_ergonomics_mapping_path",
+            default_value=_config_file(_thumb_flexion_ergonomics_config_name("left")),
+        ),
         DeclareLaunchArgument("thumb_flexion_root_gamma", default_value="1.0"),
         DeclareLaunchArgument("thumb_flexion_tip_gamma", default_value="1.0"),
-        DeclareLaunchArgument("thumb_flexion_open_straightness_threshold", default_value="0.0"),
-        DeclareLaunchArgument("thumb_flexion_open_angle_deadband_rad", default_value="0.0"),
         DeclareLaunchArgument("thumb_ik_debug", default_value="false"),
         DeclareLaunchArgument("thumb_segment_start", default_value="2"),
         DeclareLaunchArgument("thumb_segment_end", default_value="3"),
-        DeclareLaunchArgument("thumb_segment_frame_path", default_value=""),
         DeclareLaunchArgument("thumb_segment_scale", default_value="1.0"),
         DeclareLaunchArgument("thumb_segment_damping", default_value="0.0008"),
         DeclareLaunchArgument("thumb_segment_max_step", default_value="0.20"),
@@ -498,7 +495,9 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         roll_gate_end_name: str,
         yaw_gate_start_name: str,
         yaw_gate_end_name: str,
+        finger_flexion_ergonomics_calibration_path_name: str,
         finger_yaw_calibration_path_name: str,
+        thumb_flexion_ergonomics_mapping_path_name: str,
         haptic_glove_id_name: str,
         haptic_force_topic_name: str,
         haptic_vib_topic_name: str,
@@ -522,14 +521,14 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
             root_gamma=LaunchConfiguration("root_gamma"),
             tip_gamma=LaunchConfiguration("tip_gamma"),
             finger_yaw_calibration_path=LaunchConfiguration(finger_yaw_calibration_path_name),
-            flexion_calibration_path=_config_file(_flexion_config_name(hand_type)),
-            thumb_flexion_mapping_path=_config_file(_thumb_flexion_config_name(hand_type)),
+            finger_flexion_ergonomics_calibration_path=LaunchConfiguration(
+                finger_flexion_ergonomics_calibration_path_name
+            ),
+            thumb_flexion_ergonomics_mapping_path=LaunchConfiguration(
+                thumb_flexion_ergonomics_mapping_path_name
+            ),
             thumb_flexion_root_gamma=LaunchConfiguration("thumb_flexion_root_gamma"),
             thumb_flexion_tip_gamma=LaunchConfiguration("thumb_flexion_tip_gamma"),
-            thumb_flexion_open_straightness_threshold=LaunchConfiguration(
-                "thumb_flexion_open_straightness_threshold"
-            ),
-            thumb_flexion_open_angle_deadband_rad=LaunchConfiguration("thumb_flexion_open_angle_deadband_rad"),
             thumb_ik_debug=LaunchConfiguration("thumb_ik_debug"),
             thumb_segment_start=LaunchConfiguration("thumb_segment_start"),
             thumb_segment_end=LaunchConfiguration("thumb_segment_end"),
@@ -560,8 +559,6 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
             haptic_poll_rate_hz=LaunchConfiguration("haptic_poll_rate_hz"),
             haptic_read_mode=LaunchConfiguration("haptic_read_mode"),
             haptic_normal_force_full_scale=LaunchConfiguration("haptic_normal_force_full_scale"),
-            flexion_open_straightness_threshold=LaunchConfiguration("flexion_open_straightness_threshold"),
-            flexion_open_angle_deadband_rad=LaunchConfiguration("flexion_open_angle_deadband_rad"),
         )
 
     return LaunchDescription(
@@ -576,7 +573,9 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
                 "right_thumb_segment_roll_progress_gate_end",
                 "right_thumb_segment_yaw_progress_gate_start",
                 "right_thumb_segment_yaw_progress_gate_end",
+                "right_finger_flexion_ergonomics_calibration_path",
                 "right_finger_yaw_calibration_path",
+                "right_thumb_flexion_ergonomics_mapping_path",
                 "right_haptic_glove_id",
                 "right_haptic_force_topic",
                 "right_haptic_vib_topic",
@@ -590,7 +589,9 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
                 "left_thumb_segment_roll_progress_gate_end",
                 "left_thumb_segment_yaw_progress_gate_start",
                 "left_thumb_segment_yaw_progress_gate_end",
+                "left_finger_flexion_ergonomics_calibration_path",
                 "left_finger_yaw_calibration_path",
+                "left_thumb_flexion_ergonomics_mapping_path",
                 "left_haptic_glove_id",
                 "left_haptic_force_topic",
                 "left_haptic_vib_topic",

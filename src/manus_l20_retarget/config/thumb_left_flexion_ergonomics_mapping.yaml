@@ -1,7 +1,10 @@
-schema: manus_l20.thumb_flexion_mapping.v1
+schema: manus_l20.thumb_flexion_ergonomics.v1
 finger: thumb
-root_flexion_direction_sign: 1.0
-tip_flexion_direction_sign: 1.0
+source: ergonomics
+root_ergonomics_key: ThumbMCPStretch
+tip_ergonomics_keys:
+- ThumbPIPStretch
+- ThumbDIPStretch
 command:
   thumb_natural_open_command:
   - 160    # 0  Thumb Base / 拇指根部弯曲
@@ -46,13 +49,51 @@ command:
   - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
   - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
 samples:
-  thumb_pinky_root_touch:
-    root_rad: 0.579342
-    tip_rad: 0.838453
-    root_signed_rad: 0.579342
-    tip_signed_rad: 0.838453
   thumb_natural_open:
-    root_rad: 0.012372
-    tip_rad: 0.0
-    root_signed_rad: 0.012372
-    tip_signed_rad: -0.350714
+    root_value: 47.695419
+    tip_value: -25.208706
+    ergonomics:
+      IndexDIPStretch: -4.960445
+      IndexMCPStretch: -4.442928
+      IndexPIPStretch: -0.016855
+      IndexSpread: 11.835783
+      MiddleDIPStretch: -9.566486
+      MiddleMCPStretch: -5.678485
+      MiddlePIPStretch: -0.003458
+      MiddleSpread: -0.958245
+      PinkyDIPStretch: -15.82557
+      PinkyMCPStretch: 20.573427
+      PinkyPIPStretch: -0.413898
+      PinkySpread: -32.344294
+      RingDIPStretch: -9.693819
+      RingMCPStretch: -2.741892
+      RingPIPStretch: 0.060822
+      RingSpread: -10.686312
+      ThumbDIPStretch: -24.947281
+      ThumbMCPSpread: 9.273286
+      ThumbMCPStretch: 47.695419
+      ThumbPIPStretch: -0.261425
+  thumb_pinky_root_touch:
+    root_value: 2.697975
+    tip_value: 77.902811
+    ergonomics:
+      IndexDIPStretch: -4.82911
+      IndexMCPStretch: 39.824761
+      IndexPIPStretch: 36.156455
+      IndexSpread: 9.370004
+      MiddleDIPStretch: 8.223604
+      MiddleMCPStretch: 11.731238
+      MiddlePIPStretch: 0.022068
+      MiddleSpread: -5.779725
+      PinkyDIPStretch: -17.323479
+      PinkyMCPStretch: 41.473627
+      PinkyPIPStretch: -0.584266
+      PinkySpread: -21.013652
+      RingDIPStretch: 2.867024
+      RingMCPStretch: 14.300197
+      RingPIPStretch: 0.356738
+      RingSpread: -6.293795
+      ThumbDIPStretch: 45.648319
+      ThumbMCPSpread: 24.976758
+      ThumbMCPStretch: 2.697975
+      ThumbPIPStretch: 32.254492

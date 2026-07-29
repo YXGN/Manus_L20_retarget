@@ -14,13 +14,11 @@ from rclpy.node import Node
 
 from .manus_landmarks import manus_raw_nodes_to_mediapipe_landmarks
 from .manus_l20_retarget_node import (
-    FINGER_LANDMARKS,
     STANDARD_OPEN_COMMAND,
     _command_parameter,
     _default_workspace_root,
     _manus_thumb_local_point_at,
 )
-from .retarget_pipeline import _directed_finger_flexion_rad, _joint_flexion_rad
 
 
 DEFAULT_L20_OPEN_COMMAND = [
@@ -54,6 +52,20 @@ DEFAULT_THUMB_NATURAL_OPEN_COMMAND = [
     100, 255, 255, 255, 255,
 ]
 FINGER_NAMES = ("index", "middle", "ring", "pinky")
+FINGER_FLEXION_ROOT_ERGONOMICS_KEYS = (
+    "IndexMCPStretch",
+    "MiddleMCPStretch",
+    "RingMCPStretch",
+    "PinkyMCPStretch",
+)
+FINGER_FLEXION_TIP_ERGONOMICS_KEY_GROUPS = (
+    ("IndexPIPStretch", "IndexDIPStretch"),
+    ("MiddlePIPStretch", "MiddleDIPStretch"),
+    ("RingPIPStretch", "RingDIPStretch"),
+    ("PinkyPIPStretch", "PinkyDIPStretch"),
+)
+THUMB_FLEXION_ROOT_ERGONOMICS_KEY = "ThumbMCPStretch"
+THUMB_FLEXION_TIP_ERGONOMICS_KEYS = ("ThumbPIPStretch", "ThumbDIPStretch")
 ERGONOMICS_YAW_TOKENS = ("spread", "abduction", "adduction", "abd", "add", "yaw")
 L20_COMMAND_SLOT_COMMENTS = (
     "0  Thumb Base / 拇指根部弯曲",
@@ -77,43 +89,6 @@ L20_COMMAND_SLOT_COMMENTS = (
     "18 Ring Finger Tip / 无名指指尖弯曲",
     "19 Pinky Finger Tip / 小指指尖弯曲",
 )
-
-
-class FlexionCalibrationCapture(Node):
-    def __init__(self, glove_topic: str, transform: str) -> None:
-        super().__init__("manus_l20_flexion_calibration_capture")
-        self._transform = transform
-        self._lock = threading.Lock()
-        self._collecting = False
-        self._samples: list[dict[str, list[float]]] = []
-        self.create_subscription(ManusGlove, glove_topic, self._on_glove, 10)
-
-    def _on_glove(self, msg: ManusGlove) -> None:
-        landmarks = manus_raw_nodes_to_mediapipe_landmarks(
-            msg.raw_nodes,
-            transform=self._transform,
-        )
-        sample = _flexion_angles(landmarks)
-        with self._lock:
-            if self._collecting:
-                self._samples.append(sample)
-
-    def capture(self, duration_sec: float) -> dict[str, list[float]]:
-        with self._lock:
-            self._samples = []
-            self._collecting = True
-        time.sleep(duration_sec)
-        with self._lock:
-            self._collecting = False
-            samples = list(self._samples)
-        if not samples:
-            raise RuntimeError("no MANUS glove samples captured")
-        return {
-            "root_rad": _mean_vector([sample["root_rad"] for sample in samples]),
-            "tip_rad": _mean_vector([sample["tip_rad"] for sample in samples]),
-            "root_signed_rad": _mean_vector([sample["root_signed_rad"] for sample in samples]),
-            "tip_signed_rad": _mean_vector([sample["tip_signed_rad"] for sample in samples]),
-        }
 
 
 class FingerYawErgonomicsCalibrationCapture(Node):
@@ -145,49 +120,6 @@ class FingerYawErgonomicsCalibrationCapture(Node):
             key: round(float(statistics.fmean(sample[key] for sample in samples if key in sample)), 6)
             for key in keys
             if any(key in sample for sample in samples)
-        }
-
-
-class ThumbFlexionMappingCapture(Node):
-    def __init__(self, glove_topic: str, transform: str) -> None:
-        super().__init__("manus_l20_thumb_flexion_mapping_capture")
-        self._transform = transform
-        self._lock = threading.Lock()
-        self._collecting = False
-        self._samples: list[dict[str, float]] = []
-        self.create_subscription(ManusGlove, glove_topic, self._on_glove, 10)
-
-    def _on_glove(self, msg: ManusGlove) -> None:
-        landmarks = manus_raw_nodes_to_mediapipe_landmarks(
-            msg.raw_nodes,
-            transform=self._transform,
-        )
-        thumb_mcp, thumb_pip, thumb_dip, thumb_tip = FINGER_LANDMARKS[0]
-        sample = {
-            "root_rad": _joint_flexion_rad(landmarks[thumb_mcp], landmarks[thumb_pip], landmarks[thumb_dip]),
-            "tip_rad": _joint_flexion_rad(landmarks[thumb_pip], landmarks[thumb_dip], landmarks[thumb_tip]),
-            "root_signed_rad": _directed_finger_flexion_rad(landmarks, 0, root=True),
-            "tip_signed_rad": _directed_finger_flexion_rad(landmarks, 0, root=False),
-        }
-        with self._lock:
-            if self._collecting:
-                self._samples.append(sample)
-
-    def capture(self, duration_sec: float) -> dict[str, float]:
-        with self._lock:
-            self._samples = []
-            self._collecting = True
-        time.sleep(duration_sec)
-        with self._lock:
-            self._collecting = False
-            samples = list(self._samples)
-        if not samples:
-            raise RuntimeError("no MANUS glove samples captured")
-        return {
-            "root_rad": round(float(statistics.fmean(sample["root_rad"] for sample in samples)), 6),
-            "tip_rad": round(float(statistics.fmean(sample["tip_rad"] for sample in samples)), 6),
-            "root_signed_rad": round(float(statistics.fmean(sample["root_signed_rad"] for sample in samples)), 6),
-            "tip_signed_rad": round(float(statistics.fmean(sample["tip_signed_rad"] for sample in samples)), 6),
         }
 
 
@@ -256,19 +188,11 @@ class FullCalibrationCapture(Node):
             msg.raw_nodes,
             transform=self._transform,
         )
-        thumb_mcp, thumb_pip, thumb_dip, thumb_tip = FINGER_LANDMARKS[0]
         start = _manus_thumb_local_point_at(landmarks, self._segment_start)
         end = _manus_thumb_local_point_at(landmarks, self._segment_end)
         vector = end if self._segment_start == self._segment_end else end - start
         ergonomics = {str(entry.type): float(entry.value) for entry in msg.ergonomics if entry.type}
         sample = {
-            "flexion": _flexion_angles(landmarks),
-            "thumb_flexion": {
-                "root_rad": _joint_flexion_rad(landmarks[thumb_mcp], landmarks[thumb_pip], landmarks[thumb_dip]),
-                "tip_rad": _joint_flexion_rad(landmarks[thumb_pip], landmarks[thumb_dip], landmarks[thumb_tip]),
-                "root_signed_rad": _directed_finger_flexion_rad(landmarks, 0, root=True),
-                "tip_signed_rad": _directed_finger_flexion_rad(landmarks, 0, root=False),
-            },
             "thumb_segment_vector": [float(value) for value in vector],
             "yaw": ergonomics,
         }
@@ -287,39 +211,9 @@ class FullCalibrationCapture(Node):
         if not samples:
             raise RuntimeError("no MANUS glove samples captured")
         return {
-            "flexion": {
-                "root_rad": _mean_vector([sample["flexion"]["root_rad"] for sample in samples]),
-                "tip_rad": _mean_vector([sample["flexion"]["tip_rad"] for sample in samples]),
-                "root_signed_rad": _mean_vector([sample["flexion"]["root_signed_rad"] for sample in samples]),
-                "tip_signed_rad": _mean_vector([sample["flexion"]["tip_signed_rad"] for sample in samples]),
-            },
-            "thumb_flexion": {
-                "root_rad": round(float(statistics.fmean(sample["thumb_flexion"]["root_rad"] for sample in samples)), 6),
-                "tip_rad": round(float(statistics.fmean(sample["thumb_flexion"]["tip_rad"] for sample in samples)), 6),
-                "root_signed_rad": round(float(statistics.fmean(sample["thumb_flexion"]["root_signed_rad"] for sample in samples)), 6),
-                "tip_signed_rad": round(float(statistics.fmean(sample["thumb_flexion"]["tip_signed_rad"] for sample in samples)), 6),
-            },
             "thumb_segment_vector": _mean_vector([sample["thumb_segment_vector"] for sample in samples]),
             "yaw": _mean_ergonomics(samples),
         }
-
-
-def _flexion_angles(landmarks: Any) -> dict[str, list[float]]:
-    root_angles: list[float] = []
-    tip_angles: list[float] = []
-    root_signed_angles: list[float] = []
-    tip_signed_angles: list[float] = []
-    for finger_index, (mcp, pip, dip, tip) in enumerate(FINGER_LANDMARKS):
-        root_angles.append(_joint_flexion_rad(landmarks[mcp], landmarks[pip], landmarks[dip]))
-        tip_angles.append(_joint_flexion_rad(landmarks[pip], landmarks[dip], landmarks[tip]))
-        root_signed_angles.append(_directed_finger_flexion_rad(landmarks, finger_index, root=True))
-        tip_signed_angles.append(_directed_finger_flexion_rad(landmarks, finger_index, root=False))
-    return {
-        "root_rad": root_angles,
-        "tip_rad": tip_angles,
-        "root_signed_rad": root_signed_angles,
-        "tip_signed_rad": tip_signed_angles,
-    }
 
 
 def _mean_vector(samples: list[list[float]]) -> list[float]:
@@ -362,60 +256,6 @@ def _existing_top_level_command(path: str, key: str, fallback: list[int]) -> lis
     except (OSError, yaml.YAMLError):
         return list(fallback)
     return _command_parameter(data.get(key), fallback)
-
-
-def _direction_signs(open_values: list[float] | None, closed_values: list[float] | None, length: int) -> list[float]:
-    if open_values is None or closed_values is None:
-        return [1.0] * length
-    signs: list[float] = []
-    for index in range(length):
-        try:
-            delta = float(closed_values[index]) - float(open_values[index])
-        except (IndexError, TypeError, ValueError):
-            delta = 0.0
-        signs.append(1.0 if delta >= 0.0 else -1.0)
-    return signs
-
-
-def _apply_direction_signs(values: list[float] | None, signs: list[float], fallback: list[float]) -> list[float]:
-    if values is None:
-        return list(fallback)
-    output: list[float] = []
-    for index, sign in enumerate(signs):
-        try:
-            output.append(round(max(0.0, float(values[index]) * float(sign)), 6))
-        except (IndexError, TypeError, ValueError):
-            output.append(round(float(fallback[index]), 6))
-    return output
-
-
-def _build_flexion_calibration(samples: dict[str, dict[str, list[float]]], output_path: str) -> dict[str, Any]:
-    open_sample = samples["open"]
-    four_finger_sample = samples["four_finger_fist"]
-    root_signs = _direction_signs(open_sample.get("root_signed_rad"), four_finger_sample.get("root_signed_rad"), 5)
-    tip_signs = _direction_signs(open_sample.get("tip_signed_rad"), four_finger_sample.get("tip_signed_rad"), 5)
-    root_open = _apply_direction_signs(open_sample.get("root_signed_rad"), root_signs, open_sample["root_rad"])
-    tip_open = _apply_direction_signs(open_sample.get("tip_signed_rad"), tip_signs, open_sample["tip_rad"])
-    root_fist = _apply_direction_signs(four_finger_sample.get("root_signed_rad"), root_signs, four_finger_sample["root_rad"])
-    tip_fist = _apply_direction_signs(four_finger_sample.get("tip_signed_rad"), tip_signs, four_finger_sample["tip_rad"])
-    root_closed = [root_open[0], *root_fist[1:]]
-    tip_closed = [tip_open[0], *tip_fist[1:]]
-    command = _existing_command(output_path) or {
-        "open_command": DEFAULT_L20_OPEN_COMMAND,
-        "four_finger_closed_command": DEFAULT_L20_FOUR_FINGER_CLOSED_COMMAND,
-    }
-    return {
-        "schema": "manus_l20.flexion_calibration.v1",
-        "finger_order": ["thumb", "index", "middle", "ring", "pinky"],
-        "root_flexion_open_rad": root_open,
-        "root_flexion_closed_rad": root_closed,
-        "tip_flexion_open_rad": tip_open,
-        "tip_flexion_closed_rad": tip_closed,
-        "root_flexion_direction_sign": root_signs,
-        "tip_flexion_direction_sign": tip_signs,
-        "command": command,
-        "samples": samples,
-    }
 
 
 def _build_finger_yaw_ergonomics_calibration(
@@ -481,61 +321,88 @@ def _normalized_key(key: str) -> str:
     return "".join(ch.lower() for ch in str(key) if ch.isalnum())
 
 
-def _build_thumb_flexion_calibration(samples: dict[str, dict[str, float]], output_path: str) -> dict[str, Any]:
-    open_sample = samples["thumb_natural_open"]
-    touch_sample = samples["thumb_pinky_root_touch"]
-    root_sign = _direction_signs(
-        [open_sample.get("root_signed_rad", open_sample["root_rad"])],
-        [touch_sample.get("root_signed_rad", touch_sample["root_rad"])],
-        1,
-    )[0]
-    tip_sign = _direction_signs(
-        [open_sample.get("tip_signed_rad", open_sample["tip_rad"])],
-        [touch_sample.get("tip_signed_rad", touch_sample["tip_rad"])],
-        1,
-    )[0]
-    samples = {
-        "thumb_pinky_root_touch": {
-            **touch_sample,
-            "root_rad": round(max(0.0, float(touch_sample.get("root_signed_rad", touch_sample["root_rad"])) * root_sign), 6),
-            "tip_rad": round(max(0.0, float(touch_sample.get("tip_signed_rad", touch_sample["tip_rad"])) * tip_sign), 6),
-        },
-        "thumb_natural_open": {
-            **open_sample,
-            "root_rad": round(max(0.0, float(open_sample.get("root_signed_rad", open_sample["root_rad"])) * root_sign), 6),
-            "tip_rad": round(max(0.0, float(open_sample.get("tip_signed_rad", open_sample["tip_rad"])) * tip_sign), 6),
+def _ergonomics_values(sample: dict[str, float], keys: tuple[str, ...]) -> list[float]:
+    missing = [key for key in keys if key not in sample]
+    if missing:
+        raise RuntimeError(f"MANUS ergonomics sample is missing keys: {missing}")
+    return [round(float(sample[key]), 6) for key in keys]
+
+
+def _ergonomics_group_values(
+    sample: dict[str, float],
+    key_groups: tuple[tuple[str, ...], ...],
+) -> list[float]:
+    values: list[float] = []
+    for keys in key_groups:
+        missing = [key for key in keys if key not in sample]
+        if missing:
+            raise RuntimeError(f"MANUS ergonomics sample is missing keys: {missing}")
+        values.append(round(sum(float(sample[key]) for key in keys), 6))
+    return values
+
+
+def _build_finger_flexion_ergonomics_calibration(
+    samples: dict[str, dict[str, float]],
+    output_path: str,
+) -> dict[str, Any]:
+    open_sample = samples["natural_open"]
+    fist_sample = samples["four_finger_fist"]
+    command = _existing_command(output_path) or {
+        "open_command": DEFAULT_L20_OPEN_COMMAND,
+        "four_finger_closed_command": DEFAULT_L20_FOUR_FINGER_CLOSED_COMMAND,
+    }
+    return {
+        "schema": "manus_l20.finger_flexion_ergonomics.v1",
+        "finger_order": list(FINGER_NAMES),
+        "source": "ergonomics",
+        "root_ergonomics_keys": list(FINGER_FLEXION_ROOT_ERGONOMICS_KEYS),
+        "tip_ergonomics_key_groups": [list(keys) for keys in FINGER_FLEXION_TIP_ERGONOMICS_KEY_GROUPS],
+        "command": command,
+        "samples": {
+            "natural_open": {
+                "root_value": _ergonomics_values(open_sample, FINGER_FLEXION_ROOT_ERGONOMICS_KEYS),
+                "tip_value": _ergonomics_group_values(open_sample, FINGER_FLEXION_TIP_ERGONOMICS_KEY_GROUPS),
+                "ergonomics": open_sample,
+            },
+            "four_finger_fist": {
+                "root_value": _ergonomics_values(fist_sample, FINGER_FLEXION_ROOT_ERGONOMICS_KEYS),
+                "tip_value": _ergonomics_group_values(fist_sample, FINGER_FLEXION_TIP_ERGONOMICS_KEY_GROUPS),
+                "ergonomics": fist_sample,
+            },
         },
     }
+
+
+def _build_thumb_flexion_ergonomics_calibration(
+    samples: dict[str, dict[str, float]],
+    output_path: str,
+) -> dict[str, Any]:
+    open_sample = samples["thumb_natural_open"]
+    touch_sample = samples["thumb_pinky_root_touch"]
     command = _existing_command(output_path) or {
         "thumb_natural_open_command": DEFAULT_THUMB_NATURAL_OPEN_COMMAND,
         "thumb_pinky_root_touch_command": None,
     }
     return {
-        "schema": "manus_l20.thumb_flexion_mapping.v1",
+        "schema": "manus_l20.thumb_flexion_ergonomics.v1",
         "finger": "thumb",
-        "root_flexion_direction_sign": root_sign,
-        "tip_flexion_direction_sign": tip_sign,
+        "source": "ergonomics",
+        "root_ergonomics_key": THUMB_FLEXION_ROOT_ERGONOMICS_KEY,
+        "tip_ergonomics_keys": list(THUMB_FLEXION_TIP_ERGONOMICS_KEYS),
         "command": command,
-        "samples": samples,
+        "samples": {
+            "thumb_natural_open": {
+                "root_value": _ergonomics_values(open_sample, (THUMB_FLEXION_ROOT_ERGONOMICS_KEY,))[0],
+                "tip_value": _ergonomics_group_values(open_sample, (THUMB_FLEXION_TIP_ERGONOMICS_KEYS,))[0],
+                "ergonomics": open_sample,
+            },
+            "thumb_pinky_root_touch": {
+                "root_value": _ergonomics_values(touch_sample, (THUMB_FLEXION_ROOT_ERGONOMICS_KEY,))[0],
+                "tip_value": _ergonomics_group_values(touch_sample, (THUMB_FLEXION_TIP_ERGONOMICS_KEYS,))[0],
+                "ergonomics": touch_sample,
+            },
+        },
     }
-
-
-def _load_command(path_value: str, key: str, fallback: list[int]) -> list[int]:
-    path_text = str(path_value).strip()
-    if not path_text:
-        return list(fallback)
-    path = Path(path_text).expanduser()
-    if not path.exists():
-        return list(fallback)
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-    except (OSError, yaml.YAMLError):
-        return list(fallback)
-    command_data = data.get("command")
-    if not isinstance(command_data, dict):
-        return list(fallback)
-    return _command_parameter(command_data.get(key), fallback)
 
 
 def _spin_capture_node(node: Node) -> threading.Thread:
@@ -608,28 +475,6 @@ def _indent_of(line: str) -> int:
     return len(line) - len(line.lstrip(" "))
 
 
-def run_flexion(parsed: argparse.Namespace) -> None:
-    rclpy.init()
-    node = FlexionCalibrationCapture(parsed.glove_topic, parsed.transform)
-    spin_thread = _spin_capture_node(node)
-    labels = [
-        ("open", "张开手掌，五指尽量完全伸直"),
-        ("four_finger_fist", "四指完全弯曲握拳，拇指姿势不用管"),
-    ]
-    samples: dict[str, dict[str, list[float]]] = {}
-    try:
-        for label, prompt in labels:
-            input(f"Set pose '{label}' ({prompt}), hold still, then press Enter...")
-            print(f"Capturing '{label}' for {parsed.duration:.1f}s...")
-            samples[label] = node.capture(parsed.duration)
-            print(yaml.safe_dump({label: samples[label]}, sort_keys=False, allow_unicode=True))
-        calibration = _build_flexion_calibration(samples, parsed.output)
-        output_path = _save_yaml(calibration, parsed.output)
-        print(f"Saved flexion calibration to {output_path}")
-    finally:
-        _shutdown_capture_node(node, spin_thread)
-
-
 def run_finger_yaw_ergonomics(parsed: argparse.Namespace) -> None:
     rclpy.init()
     node = FingerYawErgonomicsCalibrationCapture(parsed.glove_topic)
@@ -665,13 +510,25 @@ def run_finger_yaw_ergonomics(parsed: argparse.Namespace) -> None:
         _shutdown_capture_node(node, spin_thread)
 
 
-def run_thumb_flexion(parsed: argparse.Namespace) -> None:
+def run_ergonomics_flexion(parsed: argparse.Namespace) -> None:
+    hand = str(parsed.hand).strip().lower()
+    finger_output = _config_output_path(
+        hand,
+        "finger_flexion_ergonomics_{hand}_calibration.yaml",
+        parsed.finger_output,
+    )
+    thumb_output = _config_output_path(
+        hand,
+        "thumb_{hand}_flexion_ergonomics_mapping.yaml",
+        parsed.thumb_output,
+    )
     rclpy.init()
-    node = ThumbFlexionMappingCapture(parsed.glove_topic, parsed.transform)
+    node = FingerYawErgonomicsCalibrationCapture(parsed.glove_topic)
     spin_thread = _spin_capture_node(node)
     labels = [
+        ("natural_open", "手指自然张开，大拇指处在标准自然张开位"),
+        ("four_finger_fist", "四指完全弯曲握拳"),
         ("thumb_pinky_root_touch", "大拇指触碰小拇指指根"),
-        ("thumb_natural_open", "手指自然张开"),
     ]
     samples: dict[str, dict[str, float]] = {}
     try:
@@ -679,23 +536,36 @@ def run_thumb_flexion(parsed: argparse.Namespace) -> None:
             input(f"Set pose '{label}' ({prompt}), hold still, then press Enter...")
             print(f"Capturing '{label}' for {parsed.duration:.1f}s...")
             samples[label] = node.capture(parsed.duration)
-            print(yaml.safe_dump({label: samples[label]}, sort_keys=False, allow_unicode=True))
-        calibration = _build_thumb_flexion_calibration(samples, parsed.output)
-        output_path = _save_yaml(calibration, parsed.output)
-        print(f"Saved thumb flexion mapping calibration to {output_path}")
+        finger_calibration = _build_finger_flexion_ergonomics_calibration(
+            {
+                "natural_open": samples["natural_open"],
+                "four_finger_fist": samples["four_finger_fist"],
+            },
+            finger_output,
+        )
+        thumb_calibration = _build_thumb_flexion_ergonomics_calibration(
+            {
+                "thumb_natural_open": samples["natural_open"],
+                "thumb_pinky_root_touch": samples["thumb_pinky_root_touch"],
+            },
+            thumb_output,
+        )
+        saved_paths = [
+            _save_yaml(finger_calibration, finger_output),
+            _save_yaml(thumb_calibration, thumb_output),
+        ]
+        print(yaml.safe_dump({"saved": [str(path) for path in saved_paths]}, sort_keys=False, allow_unicode=True))
     finally:
         _shutdown_capture_node(node, spin_thread)
 
 
 def run_thumb_frame(parsed: argparse.Namespace) -> None:
     robot_open_command = _command_parameter(parsed.robot_open_command, STANDARD_OPEN_COMMAND)
-    robot_touch_command = _command_parameter(parsed.robot_touch_command, robot_open_command)
-    if not str(parsed.robot_touch_command).strip():
-        robot_touch_command = _load_command(
-            parsed.thumb_flexion_mapping_path,
-            "thumb_pinky_root_touch_command",
-            robot_open_command,
-        )
+    robot_touch_command = (
+        _command_parameter(parsed.robot_touch_command, robot_open_command)
+        if str(parsed.robot_touch_command).strip()
+        else _existing_top_level_command(parsed.output, "robot_touch_command", robot_open_command)
+    )
 
     rclpy.init()
     node = ThumbSegmentVectorCapture(
@@ -743,9 +613,17 @@ def run_all(parsed: argparse.Namespace) -> None:
     transform = str(parsed.transform)
     if hand == "left" and transform == "right_glove_to_right_retarget":
         transform = "left_glove_to_right_retarget"
-    flexion_output = _config_output_path(hand, "flexion_{hand}_calibration.yaml", parsed.flexion_output)
+    finger_flexion_ergonomics_output = _config_output_path(
+        hand,
+        "finger_flexion_ergonomics_{hand}_calibration.yaml",
+        parsed.finger_flexion_ergonomics_output,
+    )
     yaw_output = _config_output_path(hand, "finger_yaw_ergonomics_{hand}_calibration.yaml", parsed.finger_yaw_output)
-    thumb_flexion_output = _config_output_path(hand, "thumb_{hand}_flexion_mapping.yaml", parsed.thumb_flexion_output)
+    thumb_flexion_ergonomics_output = _config_output_path(
+        hand,
+        "thumb_{hand}_flexion_ergonomics_mapping.yaml",
+        parsed.thumb_flexion_ergonomics_output,
+    )
     thumb_frame_output = _config_output_path(hand, "thumb_segment_frame_{hand}.yaml", parsed.thumb_frame_output)
 
     rclpy.init()
@@ -771,24 +649,27 @@ def run_all(parsed: argparse.Namespace) -> None:
             samples[label] = node.capture(parsed.duration)
             print(yaml.safe_dump({label: samples[label]}, sort_keys=False, allow_unicode=True))
 
-        flexion_samples = {
-            "open": samples["natural_open"]["flexion"],
-            "four_finger_fist": samples["four_finger_fist"]["flexion"],
-        }
         yaw_samples = {
             "natural_open": samples["natural_open"]["yaw"],
             "finger_close": samples["finger_close"]["yaw"],
             "finger_spread": samples["finger_spread"]["yaw"],
         }
-        thumb_flexion_samples = {
-            "thumb_pinky_root_touch": samples["thumb_pinky_root_touch"]["thumb_flexion"],
-            "thumb_natural_open": samples["natural_open"]["thumb_flexion"],
-        }
-
-        flexion_calibration = _build_flexion_calibration(flexion_samples, flexion_output)
+        finger_flexion_ergonomics_calibration = _build_finger_flexion_ergonomics_calibration(
+            {
+                "natural_open": samples["natural_open"]["yaw"],
+                "four_finger_fist": samples["four_finger_fist"]["yaw"],
+            },
+            finger_flexion_ergonomics_output,
+        )
         ergonomics_keys = _parse_key_list(parsed.ergonomics_keys)
         yaw_calibration = _build_finger_yaw_ergonomics_calibration(yaw_samples, yaw_output, ergonomics_keys)
-        thumb_flexion_calibration = _build_thumb_flexion_calibration(thumb_flexion_samples, thumb_flexion_output)
+        thumb_flexion_ergonomics_calibration = _build_thumb_flexion_ergonomics_calibration(
+            {
+                "thumb_natural_open": samples["natural_open"]["yaw"],
+                "thumb_pinky_root_touch": samples["thumb_pinky_root_touch"]["yaw"],
+            },
+            thumb_flexion_ergonomics_output,
+        )
 
         parsed_robot_open = _command_parameter(parsed.robot_open_command, [])
         robot_open_command = (
@@ -801,7 +682,7 @@ def run_all(parsed: argparse.Namespace) -> None:
             robot_touch_command = parsed_robot_touch
         else:
             touch_fallback = _command_parameter(
-                thumb_flexion_calibration["command"].get("thumb_pinky_root_touch_command"),
+                thumb_flexion_ergonomics_calibration["command"].get("thumb_pinky_root_touch_command"),
                 robot_open_command,
             )
             robot_touch_command = _existing_top_level_command(
@@ -821,9 +702,9 @@ def run_all(parsed: argparse.Namespace) -> None:
         }
 
         saved_paths = [
-            _save_yaml(flexion_calibration, flexion_output),
+            _save_yaml(finger_flexion_ergonomics_calibration, finger_flexion_ergonomics_output),
             _save_yaml(yaw_calibration, yaw_output),
-            _save_yaml(thumb_flexion_calibration, thumb_flexion_output),
+            _save_yaml(thumb_flexion_ergonomics_calibration, thumb_flexion_ergonomics_output),
             _save_yaml(thumb_frame_calibration, thumb_frame_output),
         ]
         print(
@@ -863,11 +744,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Capture MANUS -> L20 calibration YAML files.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    flexion = subparsers.add_parser("flexion", description="Capture open/fist flexion calibration.")
-    _add_common_glove_args(flexion)
-    flexion.add_argument("--output", default=str(config_root / "flexion_right_calibration.yaml"))
-    flexion.set_defaults(func=run_flexion)
-
     ergonomics_yaw = subparsers.add_parser(
         "ergonomics-yaw",
         description="Capture a non-invasive four-finger yaw calibration using MANUS ergonomics values.",
@@ -878,17 +754,22 @@ def _build_parser() -> argparse.ArgumentParser:
     ergonomics_yaw.add_argument("--output", default=str(config_root / "finger_yaw_ergonomics_right_calibration.yaml"))
     ergonomics_yaw.set_defaults(func=run_finger_yaw_ergonomics)
 
-    thumb_flexion = subparsers.add_parser("thumb-flexion", description="Capture thumb flexion mapping.")
-    _add_common_glove_args(thumb_flexion)
-    thumb_flexion.add_argument("--output", default=str(config_root / "thumb_right_flexion_mapping.yaml"))
-    thumb_flexion.set_defaults(func=run_thumb_flexion)
+    ergonomics_flexion = subparsers.add_parser(
+        "ergonomics-flexion",
+        description="Capture four-finger and thumb flexion mappings from MANUS ergonomics.",
+    )
+    ergonomics_flexion.add_argument("--glove-topic", default="/manus_glove_0")
+    ergonomics_flexion.add_argument("--duration", type=float, default=2.0)
+    ergonomics_flexion.add_argument("--hand", choices=["right", "left"], default="right")
+    ergonomics_flexion.add_argument("--finger-output", default="")
+    ergonomics_flexion.add_argument("--thumb-output", default="")
+    ergonomics_flexion.set_defaults(func=run_ergonomics_flexion)
 
     thumb_frame = subparsers.add_parser("thumb-frame", description="Capture two-pose thumb segment frame.")
     _add_common_glove_args(thumb_frame)
     thumb_frame.add_argument("--segment-start", type=int, default=2)
     thumb_frame.add_argument("--segment-end", type=int, default=3)
     thumb_frame.add_argument("--output", default=str(config_root / "thumb_segment_frame_right.yaml"))
-    thumb_frame.add_argument("--thumb-flexion-mapping-path", default=str(config_root / "thumb_right_flexion_mapping.yaml"))
     thumb_frame.add_argument(
         "--robot-open-command",
         default="[254,248,246,249,254,128,115,111,131,188,221,255,255,255,255,254,254,254,254,254]",
@@ -898,16 +779,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     all_calibration = subparsers.add_parser(
         "all",
-        description="Capture shared poses once and write flexion/yaw/thumb calibration YAML files.",
+        description="Capture shared poses once and write the four active ergonomics/IK calibration YAML files.",
     )
     _add_common_glove_args(all_calibration)
     all_calibration.add_argument("--hand", choices=["right", "left"], default="right")
     all_calibration.add_argument("--ergonomics-keys", default="")
     all_calibration.add_argument("--segment-start", type=int, default=2)
     all_calibration.add_argument("--segment-end", type=int, default=3)
-    all_calibration.add_argument("--flexion-output", default="")
+    all_calibration.add_argument("--finger-flexion-ergonomics-output", default="")
     all_calibration.add_argument("--finger-yaw-output", default="")
-    all_calibration.add_argument("--thumb-flexion-output", default="")
+    all_calibration.add_argument("--thumb-flexion-ergonomics-output", default="")
     all_calibration.add_argument("--thumb-frame-output", default="")
     all_calibration.add_argument("--robot-open-command", default="")
     all_calibration.add_argument("--robot-touch-command", default="")
