@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from manus_ros2_msgs.msg import ManusRawNode
 
@@ -10,6 +12,36 @@ LANDMARK_LAYOUT = {
     "Ring": (("MCP", "PIP", "DIP", "TIP"), (13, 14, 15, 16)),
     "Pinky": (("MCP", "PIP", "DIP", "TIP"), (17, 18, 19, 20)),
 }
+
+
+@dataclass(slots=True)
+class ManusFingerSkeleton:
+    """Named MANUS raw-skeleton positions for one finger."""
+
+    mcp: np.ndarray
+    pip: np.ndarray
+    dip: np.ndarray
+    tip: np.ndarray
+
+
+@dataclass(slots=True)
+class ManusRawPose:
+    """Untransformed raw-node pose retained for native-pose work."""
+
+    position: np.ndarray
+    orientation_xyzw: np.ndarray
+
+
+@dataclass(slots=True)
+class ManusHandSkeleton:
+    """MANUS hand skeleton with named joints instead of landmark indexes."""
+
+    thumb: ManusFingerSkeleton
+    index: ManusFingerSkeleton
+    middle: ManusFingerSkeleton
+    ring: ManusFingerSkeleton
+    pinky: ManusFingerSkeleton
+    raw_poses: dict[tuple[str, str], ManusRawPose]
 
 TRANSFORMS: dict[str, np.ndarray] = {
     # Right MANUS glove coordinates mapped into the canonical right-hand
@@ -33,18 +65,35 @@ def manus_raw_nodes_to_mediapipe_landmarks(
     *,
     transform: str,
 ) -> np.ndarray:
+    """Legacy 21-point adapter retained for the current geometry/IK path."""
+    return manus_hand_skeleton_to_mediapipe_landmarks(
+        manus_raw_nodes_to_hand_skeleton(raw_nodes, transform=transform)
+    )
+
+
+def manus_raw_nodes_to_hand_skeleton(
+    raw_nodes: list[ManusRawNode],
+    *,
+    transform: str,
+) -> ManusHandSkeleton:
     points: dict[str, dict[str, np.ndarray]] = {chain: {} for chain in LANDMARK_LAYOUT}
+    raw_poses: dict[tuple[str, str], ManusRawPose] = {}
+    matrix = TRANSFORMS.get(transform)
+    if matrix is None:
+        raise ValueError(f"unknown MANUS landmark transform: {transform}")
+
     for node in raw_nodes:
         chain = str(node.chain_type)
+        joint = str(node.joint_type)
+        raw_poses[(chain, joint)] = _node_pose(node)
         if chain not in points:
             continue
-        joint = str(node.joint_type)
         required_joints, _ = LANDMARK_LAYOUT[chain]
         if joint not in required_joints:
             continue
         if joint in points[chain]:
             raise ValueError(f"MANUS raw_nodes contains duplicate joint: {chain}.{joint}")
-        points[chain][joint] = _node_position(node)
+        points[chain][joint] = _node_position(node) @ matrix.T
 
     missing = [
         f"{chain}.{joint}"
@@ -55,19 +104,55 @@ def manus_raw_nodes_to_mediapipe_landmarks(
     if missing:
         raise ValueError(f"MANUS raw_nodes missing required joints: {missing}")
 
+    def finger(chain: str) -> ManusFingerSkeleton:
+        return ManusFingerSkeleton(
+            mcp=points[chain]["MCP"],
+            pip=points[chain]["PIP"],
+            dip=points[chain]["DIP"],
+            tip=points[chain]["TIP"],
+        )
+
+    return ManusHandSkeleton(
+        thumb=finger("Thumb"),
+        index=finger("Index"),
+        middle=finger("Middle"),
+        ring=finger("Ring"),
+        pinky=finger("Pinky"),
+        raw_poses=raw_poses,
+    )
+
+
+def manus_hand_skeleton_to_mediapipe_landmarks(skeleton: ManusHandSkeleton) -> np.ndarray:
+    """Convert named MANUS joints to the legacy MediaPipe-compatible layout."""
     landmarks = np.zeros((21, 3), dtype=np.float64)
+    fingers = {
+        "Thumb": skeleton.thumb,
+        "Index": skeleton.index,
+        "Middle": skeleton.middle,
+        "Ring": skeleton.ring,
+        "Pinky": skeleton.pinky,
+    }
     for chain, (required_joints, slots) in LANDMARK_LAYOUT.items():
-        landmarks[list(slots)] = [points[chain][joint] for joint in required_joints]
+        finger = fingers[chain]
+        landmarks[list(slots)] = [finger.mcp, finger.pip, finger.dip, finger.tip]
 
     landmarks[0] = _estimate_wrist(landmarks)
-    matrix = TRANSFORMS.get(transform)
-    if matrix is None:
-        raise ValueError(f"unknown MANUS landmark transform: {transform}")
-    return landmarks @ matrix.T
+    return landmarks
 
 def _node_position(node: ManusRawNode) -> np.ndarray:
     position = node.pose.position
     return np.asarray([position.x, position.y, position.z], dtype=np.float64)
+
+
+def _node_pose(node: ManusRawNode) -> ManusRawPose:
+    orientation = node.pose.orientation
+    return ManusRawPose(
+        position=_node_position(node),
+        orientation_xyzw=np.asarray(
+            [orientation.x, orientation.y, orientation.z, orientation.w],
+            dtype=np.float64,
+        ),
+    )
 
 
 def _estimate_wrist(landmarks: np.ndarray) -> np.ndarray:

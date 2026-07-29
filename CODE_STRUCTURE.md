@@ -13,10 +13,10 @@
 Active calibration files:
 
 ```text
-flexion_<hand>_calibration.yaml
+finger_flexion_ergonomics_<hand>_calibration.yaml
 finger_yaw_ergonomics_<hand>_calibration.yaml
-thumb_<hand>_flexion_mapping.yaml
+thumb_<hand>_flexion_ergonomics_mapping.yaml
 thumb_segment_frame_<hand>.yaml
 ```
 
-`manus_l20_retarget_node.py` combines these into one 20-slot L20 `JointState` command. `retarget_pipeline.py` contains pure flexion/mapping math, and `manus_landmarks.py` only adapts MANUS raw nodes into landmarks.
+`manus_l20_retarget_node.py` combines these into one 20-slot L20 `JointState` command. `retarget_pipeline.py` contains the pure ergonomics mapping and command filtering math. `manus_landmarks.py` exposes named MANUS finger joints and retains the 21-point adapter only because the current thumb segment IK consumes it.

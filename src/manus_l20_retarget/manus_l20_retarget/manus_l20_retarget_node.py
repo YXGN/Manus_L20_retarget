@@ -18,23 +18,16 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 
 from .mapping import clamp_u8
-from .manus_landmarks import (
-    _palm_frame,
-)
+from .manus_landmarks import _palm_frame
 from .retarget_pipeline import (
-    FINGER_LANDMARKS,
     L20_SLOT_NAMES,
     HandFeatures,
-    HandRetargetTargets,
     L20CommandAdapter,
-    compute_landmark_flexion_targets,
+    compute_ergonomics_flexion_targets,
     extract_hand_features,
     filter_l20_command,
-    _directed_finger_flexion_rad,
-    _joint_flexion_rad,
     _lerp_command,
-    _normalized_angle,
-    _open_straightness_guard,
+    _normalized_calibration_value,
     _scale_command_delta,
 )
 
@@ -97,11 +90,6 @@ STANDARD_FIST_COMMAND = [
     3,
     10,
 ]
-DEFAULT_ROOT_OPEN_RAD = [0.00814, 0.21187, 0.22807, 0.17647, 0.19789]
-DEFAULT_ROOT_CLOSED_RAD = [0.75, 2.00, 2.05, 2.00, 1.80]
-DEFAULT_TIP_OPEN_RAD = [0.19885, 0.03296, 0.06118, 0.21235, 0.12662]
-DEFAULT_TIP_CLOSED_RAD = [0.80, 1.30, 1.80, 1.50, 1.70]
-DEFAULT_FLEXION_DIRECTION_SIGN = [1.0, -1.0, -1.0, -1.0, -1.0]
 THUMB_COMMAND_SLOTS = (0, 5, 10, 15)
 THUMB_IK_COMMAND_SLOTS = (5, 10)
 
@@ -131,19 +119,13 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("neutral_command", STANDARD_OPEN_COMMAND)
         self.declare_parameter("closed_command", STANDARD_FIST_COMMAND)
         self.declare_parameter("lock_neutral_slots", [5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
-        self.declare_parameter("root_flexion_open_rad", DEFAULT_ROOT_OPEN_RAD)
-        self.declare_parameter("root_flexion_closed_rad", DEFAULT_ROOT_CLOSED_RAD)
-        self.declare_parameter("tip_flexion_open_rad", DEFAULT_TIP_OPEN_RAD)
-        self.declare_parameter("tip_flexion_closed_rad", DEFAULT_TIP_CLOSED_RAD)
-        self.declare_parameter("flexion_calibration_path", "")
+        self.declare_parameter("finger_flexion_ergonomics_calibration_path", "")
         self.declare_parameter("root_gamma", 1.0)
         self.declare_parameter("tip_gamma", 1.0)
         self.declare_parameter("finger_yaw_calibration_path", "")
-        self.declare_parameter("thumb_flexion_mapping_path", "")
+        self.declare_parameter("thumb_flexion_ergonomics_mapping_path", "")
         self.declare_parameter("thumb_flexion_root_gamma", 1.0)
         self.declare_parameter("thumb_flexion_tip_gamma", 1.0)
-        self.declare_parameter("thumb_flexion_open_straightness_threshold", 0.0)
-        self.declare_parameter("thumb_flexion_open_angle_deadband_rad", 0.0)
         self.declare_parameter("thumb_ik_debug", False)
         self.declare_parameter("thumb_segment_start", 2)
         self.declare_parameter("thumb_segment_end", 3)
@@ -162,8 +144,6 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("thumb_segment_yaw_progress_gate_start", 0.0)
         self.declare_parameter("thumb_segment_yaw_progress_gate_end", 0.0)
         self.declare_parameter("landmark_transform", "right_glove_to_right_retarget")
-        self.declare_parameter("flexion_open_straightness_threshold", 0.985)
-        self.declare_parameter("flexion_open_angle_deadband_rad", 0.2)
 
         self._lock = threading.Lock()
         self._latest_msg: ManusGlove | None = None
@@ -195,10 +175,9 @@ class ManusL20RetargetNode(Node):
         )
         self._lock_neutral_slots = [index for index in self._lock_neutral_slots if index not in range(6, 10)]
         self._finger_yaw_mapping: dict[str, Any] | None = None
+        self._finger_flexion_ergonomics_mapping: dict[str, Any] | None = None
         self._lock_neutral_slots = [index for index in self._lock_neutral_slots if index not in (0, 5, 10, 15)]
-        self._thumb_flexion_mapping: dict[str, Any] | None = None
-        self._root_flexion_direction_sign = list(DEFAULT_FLEXION_DIRECTION_SIGN)
-        self._tip_flexion_direction_sign = list(DEFAULT_FLEXION_DIRECTION_SIGN)
+        self._thumb_flexion_ergonomics_mapping: dict[str, Any] | None = None
         self._thumb_flexion_root_gamma = max(
             0.05,
             float(self.get_parameter("thumb_flexion_root_gamma").value),
@@ -206,14 +185,6 @@ class ManusL20RetargetNode(Node):
         self._thumb_flexion_tip_gamma = max(
             0.05,
             float(self.get_parameter("thumb_flexion_tip_gamma").value),
-        )
-        self._thumb_flexion_open_straightness_threshold = max(
-            0.0,
-            min(1.0, float(self.get_parameter("thumb_flexion_open_straightness_threshold").value)),
-        )
-        self._thumb_flexion_open_angle_deadband_rad = max(
-            0.0,
-            float(self.get_parameter("thumb_flexion_open_angle_deadband_rad").value),
         )
         self._thumb_ik_debug = bool(self.get_parameter("thumb_ik_debug").value)
         self._thumb_segment_start = _landmark_index_parameter(self.get_parameter("thumb_segment_start").value, 2)
@@ -264,36 +235,12 @@ class ManusL20RetargetNode(Node):
             0.0,
             min(1.0, float(self.get_parameter("thumb_segment_yaw_progress_gate_end").value)),
         )
-        self._root_open_rad = _float_list_parameter(
-            self.get_parameter("root_flexion_open_rad").value,
-            DEFAULT_ROOT_OPEN_RAD,
-            length=5,
-        )
-        self._root_closed_rad = _float_list_parameter(
-            self.get_parameter("root_flexion_closed_rad").value,
-            DEFAULT_ROOT_CLOSED_RAD,
-            length=5,
-        )
-        self._tip_open_rad = _float_list_parameter(
-            self.get_parameter("tip_flexion_open_rad").value,
-            DEFAULT_TIP_OPEN_RAD,
-            length=5,
-        )
-        self._tip_closed_rad = _float_list_parameter(
-            self.get_parameter("tip_flexion_closed_rad").value,
-            DEFAULT_TIP_CLOSED_RAD,
-            length=5,
-        )
-        self._apply_flexion_calibration_path(str(self.get_parameter("flexion_calibration_path").value))
-        self._apply_thumb_flexion_mapping_path(str(self.get_parameter("thumb_flexion_mapping_path").value))
         self._apply_finger_yaw_calibration_path(str(self.get_parameter("finger_yaw_calibration_path").value))
-        self._flexion_open_straightness_threshold = max(
-            0.0,
-            min(1.0, float(self.get_parameter("flexion_open_straightness_threshold").value)),
+        self._apply_finger_flexion_ergonomics_calibration_path(
+            str(self.get_parameter("finger_flexion_ergonomics_calibration_path").value)
         )
-        self._flexion_open_angle_deadband_rad = max(
-            0.0,
-            float(self.get_parameter("flexion_open_angle_deadband_rad").value),
+        self._apply_thumb_flexion_ergonomics_mapping_path(
+            str(self.get_parameter("thumb_flexion_ergonomics_mapping_path").value)
         )
         self._root_gamma = max(0.05, float(self.get_parameter("root_gamma").value))
         self._tip_gamma = max(0.05, float(self.get_parameter("tip_gamma").value))
@@ -320,59 +267,6 @@ class ManusL20RetargetNode(Node):
             "MANUS -> L20 retarget node started: flexion mapping, ergonomics yaw, and two-pose thumb IK enabled"
         )
 
-    def _apply_flexion_calibration_path(self, path_value: str) -> None:
-        path_text = str(path_value).strip()
-        if not path_text:
-            return
-        path = Path(path_text).expanduser().resolve()
-        if not path.exists():
-            self.get_logger().warning(f"flexion_calibration_path not found: {path}")
-            return
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                data = yaml.safe_load(handle) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            self.get_logger().warning(f"failed to load flexion calibration {path}: {exc}")
-            return
-        self._root_open_rad = _float_list_parameter(
-            data.get("root_flexion_open_rad"),
-            self._root_open_rad,
-            length=5,
-        )
-        self._root_closed_rad = _float_list_parameter(
-            data.get("root_flexion_closed_rad"),
-            self._root_closed_rad,
-            length=5,
-        )
-        self._tip_open_rad = _float_list_parameter(
-            data.get("tip_flexion_open_rad"),
-            self._tip_open_rad,
-            length=5,
-        )
-        self._tip_closed_rad = _float_list_parameter(
-            data.get("tip_flexion_closed_rad"),
-            self._tip_closed_rad,
-            length=5,
-        )
-        self._root_flexion_direction_sign = _float_list_parameter(
-            data.get("root_flexion_direction_sign"),
-            DEFAULT_FLEXION_DIRECTION_SIGN,
-            length=5,
-        )
-        self._tip_flexion_direction_sign = _float_list_parameter(
-            data.get("tip_flexion_direction_sign"),
-            DEFAULT_FLEXION_DIRECTION_SIGN,
-            length=5,
-        )
-        self._apply_flexion_command_calibration(data.get("command"))
-        self.get_logger().info(
-            "loaded flexion calibration "
-            f"path={path}, root_open={np.round(self._root_open_rad, 5).tolist()}, "
-            f"root_closed={np.round(self._root_closed_rad, 5).tolist()}, "
-            f"tip_open={np.round(self._tip_open_rad, 5).tolist()}, "
-            f"tip_closed={np.round(self._tip_closed_rad, 5).tolist()}"
-        )
-
     def _apply_flexion_command_calibration(self, command_data: Any) -> None:
         if not isinstance(command_data, dict):
             return
@@ -386,6 +280,69 @@ class ManusL20RetargetNode(Node):
             self._neutral_command[slot] = open_command[slot]
         for slot in (1, 2, 3, 4, 16, 17, 18, 19):
             self._closed_command[slot] = four_closed[slot]
+
+    def _apply_finger_flexion_ergonomics_calibration_path(self, path_value: str) -> None:
+        path_text = str(path_value).strip()
+        if not path_text:
+            raise RuntimeError("finger_flexion_ergonomics_calibration_path is required")
+        path = Path(path_text).expanduser().resolve()
+        if not path.exists():
+            raise RuntimeError(f"finger ergonomics flexion calibration not found: {path}")
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = yaml.safe_load(handle) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise RuntimeError(f"failed to load finger ergonomics flexion calibration {path}: {exc}") from exc
+
+        samples = data.get("samples")
+        command_data = data.get("command")
+        open_sample = samples.get("natural_open") if isinstance(samples, dict) else None
+        fist_sample = samples.get("four_finger_fist") if isinstance(samples, dict) else None
+        root_keys = data.get("root_ergonomics_keys")
+        tip_key_groups = data.get("tip_ergonomics_key_groups")
+        if not (
+            str(data.get("source", "")).strip().lower() == "ergonomics"
+            and isinstance(command_data, dict)
+            and isinstance(open_sample, dict)
+            and isinstance(fist_sample, dict)
+            and isinstance(root_keys, list)
+            and isinstance(tip_key_groups, list)
+            and len(root_keys) == len(tip_key_groups) == 4
+        ):
+            raise RuntimeError(f"invalid finger ergonomics flexion calibration: {path}")
+        try:
+            normalized_tip_groups = [[str(key) for key in group] for group in tip_key_groups]
+            if any(not group for group in normalized_tip_groups):
+                raise ValueError("empty tip ergonomics key group")
+            mapping = {
+                "root_keys": [str(key) for key in root_keys],
+                "tip_key_groups": normalized_tip_groups,
+                "root_open": _float_list_parameter(open_sample.get("root_value"), [], length=4),
+                "root_closed": _float_list_parameter(fist_sample.get("root_value"), [], length=4),
+                "tip_open": _float_list_parameter(open_sample.get("tip_value"), [], length=4),
+                "tip_closed": _float_list_parameter(fist_sample.get("tip_value"), [], length=4),
+            }
+            if not all(len(mapping[key]) == 4 for key in ("root_open", "root_closed", "tip_open", "tip_closed")):
+                raise ValueError("missing calibrated ergonomics values")
+            open_command = _command_parameter(command_data.get("open_command"), self._neutral_command)
+            closed_command = _command_parameter(
+                command_data.get("four_finger_closed_command"),
+                self._closed_command,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"invalid finger ergonomics flexion values in {path}: {exc}") from exc
+
+        self._finger_flexion_ergonomics_mapping = mapping
+        self._apply_flexion_command_calibration(
+            {
+                "open_command": open_command,
+                "four_finger_closed_command": closed_command,
+            }
+        )
+        self.get_logger().info(
+            "loaded finger ergonomics flexion calibration "
+            f"path={path}, root_keys={mapping['root_keys']}, tip_key_groups={mapping['tip_key_groups']}"
+        )
 
     def _apply_finger_yaw_calibration_path(self, path_value: str) -> None:
         path_text = str(path_value).strip()
@@ -463,68 +420,60 @@ class ManusL20RetargetNode(Node):
             f"spread_cmd={self._finger_yaw_mapping['spread_cmd']}"
         )
 
-    def _apply_thumb_flexion_mapping_path(self, path_value: str) -> None:
+    def _apply_thumb_flexion_ergonomics_mapping_path(self, path_value: str) -> None:
         path_text = str(path_value).strip()
         if not path_text:
-            return
+            raise RuntimeError("thumb_flexion_ergonomics_mapping_path is required")
         path = Path(path_text).expanduser().resolve()
         if not path.exists():
-            self.get_logger().warning(f"thumb_flexion_mapping_path not found: {path}")
-            return
+            raise RuntimeError(f"thumb ergonomics flexion mapping not found: {path}")
         try:
             with path.open("r", encoding="utf-8") as handle:
                 data = yaml.safe_load(handle) or {}
         except (OSError, yaml.YAMLError) as exc:
-            self.get_logger().warning(f"failed to load thumb flexion mapping {path}: {exc}")
-            return
+            raise RuntimeError(f"failed to load thumb ergonomics flexion mapping {path}: {exc}") from exc
 
         samples = data.get("samples")
         command_data = data.get("command")
-        if not isinstance(samples, dict) or not isinstance(command_data, dict):
-            self.get_logger().warning(f"invalid thumb flexion mapping file: {path}")
-            return
-        open_sample = samples.get("thumb_natural_open")
-        touch_sample = samples.get("thumb_pinky_root_touch")
-        open_command = _command_parameter(command_data.get("thumb_natural_open_command"), self._neutral_command)
-        touch_command = _command_parameter(command_data.get("thumb_pinky_root_touch_command"), self._neutral_command)
-        if not isinstance(open_sample, dict) or not isinstance(touch_sample, dict):
-            self.get_logger().warning(f"thumb flexion mapping missing required samples: {path}")
-            return
+        open_sample = samples.get("thumb_natural_open") if isinstance(samples, dict) else None
+        touch_sample = samples.get("thumb_pinky_root_touch") if isinstance(samples, dict) else None
+        root_key = data.get("root_ergonomics_key")
+        tip_keys = data.get("tip_ergonomics_keys")
+        if not (
+            str(data.get("source", "")).strip().lower() == "ergonomics"
+            and isinstance(command_data, dict)
+            and isinstance(open_sample, dict)
+            and isinstance(touch_sample, dict)
+            and isinstance(root_key, str)
+            and isinstance(tip_keys, list)
+            and tip_keys
+        ):
+            raise RuntimeError(f"invalid thumb ergonomics flexion mapping: {path}")
         try:
-            self._thumb_flexion_mapping = {
-                "root_open_rad": float(open_sample["root_rad"]),
-                "root_touch_rad": float(touch_sample["root_rad"]),
-                "tip_open_rad": float(open_sample["tip_rad"]),
-                "tip_touch_rad": float(touch_sample["tip_rad"]),
-                "root_direction_sign": (
-                    float(data["root_flexion_direction_sign"])
-                    if data.get("root_flexion_direction_sign") is not None
-                    else None
-                ),
-                "tip_direction_sign": (
-                    float(data["tip_flexion_direction_sign"])
-                    if data.get("tip_flexion_direction_sign") is not None
-                    else None
-                ),
+            open_command = _command_parameter(command_data.get("thumb_natural_open_command"), self._neutral_command)
+            touch_command = _command_parameter(
+                command_data.get("thumb_pinky_root_touch_command"),
+                self._neutral_command,
+            )
+            mapping = {
+                "root_key": root_key,
+                "tip_keys": [str(key) for key in tip_keys],
+                "root_open": float(open_sample["root_value"]),
+                "root_touch": float(touch_sample["root_value"]),
+                "tip_open": float(open_sample["tip_value"]),
+                "tip_touch": float(touch_sample["tip_value"]),
                 "root_open_cmd": int(open_command[0]),
                 "root_touch_cmd": int(touch_command[0]),
                 "tip_open_cmd": int(open_command[15]),
                 "tip_touch_cmd": int(touch_command[15]),
             }
         except (KeyError, TypeError, ValueError) as exc:
-            self.get_logger().warning(f"invalid thumb flexion mapping values in {path}: {exc}")
-            self._thumb_flexion_mapping = None
-            return
+            raise RuntimeError(f"invalid thumb ergonomics flexion values in {path}: {exc}") from exc
+
+        self._thumb_flexion_ergonomics_mapping = mapping
         self.get_logger().info(
-            "loaded thumb flexion mapping "
-            f"path={path}, root_rad=[{self._thumb_flexion_mapping['root_open_rad']:.5f}, "
-            f"{self._thumb_flexion_mapping['root_touch_rad']:.5f}], "
-            f"tip_rad=[{self._thumb_flexion_mapping['tip_open_rad']:.5f}, "
-            f"{self._thumb_flexion_mapping['tip_touch_rad']:.5f}], "
-            f"root_cmd=[{self._thumb_flexion_mapping['root_open_cmd']}, "
-            f"{self._thumb_flexion_mapping['root_touch_cmd']}], "
-            f"tip_cmd=[{self._thumb_flexion_mapping['tip_open_cmd']}, "
-            f"{self._thumb_flexion_mapping['tip_touch_cmd']}]"
+            "loaded thumb ergonomics flexion mapping "
+            f"path={path}, root_key={mapping['root_key']}, tip_keys={mapping['tip_keys']}"
         )
 
     def _prepare_l20_thumb_ik_imports(self) -> None:
@@ -689,29 +638,30 @@ class ManusL20RetargetNode(Node):
             msg,
             landmark_transform=str(self.get_parameter("landmark_transform").value),
         )
-        return self._command_from_landmark_flexion(features)
+        return self._command_from_ergonomics(features)
 
-    def _command_from_landmark_flexion(
+    def _command_from_ergonomics(
         self,
         features: HandFeatures,
     ) -> list[int]:
         landmarks = features.landmarks
-        targets = compute_landmark_flexion_targets(
-            landmarks,
-            root_open_rad=self._root_open_rad,
-            root_closed_rad=self._root_closed_rad,
-            tip_open_rad=self._tip_open_rad,
-            tip_closed_rad=self._tip_closed_rad,
-            root_direction_sign=self._root_flexion_direction_sign,
-            tip_direction_sign=self._tip_flexion_direction_sign,
+        ergonomics_mapping = self._finger_flexion_ergonomics_mapping
+        if ergonomics_mapping is None:
+            raise RuntimeError("finger ergonomics flexion calibration was not loaded")
+        targets = compute_ergonomics_flexion_targets(
+            features.ergonomics,
+            root_keys=ergonomics_mapping["root_keys"],
+            tip_key_groups=ergonomics_mapping["tip_key_groups"],
+            root_open_values=ergonomics_mapping["root_open"],
+            root_closed_values=ergonomics_mapping["root_closed"],
+            tip_open_values=ergonomics_mapping["tip_open"],
+            tip_closed_values=ergonomics_mapping["tip_closed"],
             root_gamma=self._root_gamma,
             tip_gamma=self._tip_gamma,
-            open_straightness_threshold=self._flexion_open_straightness_threshold,
-            open_angle_deadband_rad=self._flexion_open_angle_deadband_rad,
         )
         command = self._l20_command_adapter.command_from_targets(targets)
         self._apply_finger_yaw(command, features.ergonomics)
-        self._apply_thumb_flexion_mapping(command, landmarks)
+        self._apply_thumb_flexion_mapping(command, features.ergonomics)
         self._apply_thumb_ik(command, landmarks)
         self._l20_command_adapter.apply_reserved_slots(command)
         self._l20_command_adapter.apply_neutral_locks(command)
@@ -762,54 +712,38 @@ class ManusL20RetargetNode(Node):
                 command[slot] = yaw_command
             return
 
-    def _apply_thumb_flexion_mapping(self, command: list[int], landmarks: np.ndarray) -> None:
-        mapping = self._thumb_flexion_mapping
-        if mapping is None:
-            return
-        root_sign = mapping["root_direction_sign"]
-        tip_sign = mapping["tip_direction_sign"]
-        root_angle = (
-            _joint_flexion_rad(landmarks[1], landmarks[2], landmarks[3])
-            if root_sign is None
-            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=True) * float(root_sign))
-        )
-        tip_angle = (
-            _joint_flexion_rad(landmarks[2], landmarks[3], landmarks[4])
-            if tip_sign is None
-            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=False) * float(tip_sign))
-        )
-        root_amount = _normalized_angle(
-            root_angle,
-            mapping["root_open_rad"],
-            mapping["root_touch_rad"],
+    def _apply_thumb_flexion_mapping(
+        self,
+        command: list[int],
+        ergonomics: dict[str, float],
+    ) -> None:
+        ergonomics_mapping = self._thumb_flexion_ergonomics_mapping
+        if ergonomics_mapping is None:
+            raise RuntimeError("thumb ergonomics flexion mapping was not loaded")
+        root_value = float(ergonomics[ergonomics_mapping["root_key"]])
+        tip_value = sum(float(ergonomics[key]) for key in ergonomics_mapping["tip_keys"])
+        root_amount = _normalized_calibration_value(
+            root_value,
+            ergonomics_mapping["root_open"],
+            ergonomics_mapping["root_touch"],
             self._thumb_flexion_root_gamma,
-            open_deadband_rad=self._thumb_flexion_open_angle_deadband_rad,
         )
-        tip_amount = _normalized_angle(
-            tip_angle,
-            mapping["tip_open_rad"],
-            mapping["tip_touch_rad"],
+        tip_amount = _normalized_calibration_value(
+            tip_value,
+            ergonomics_mapping["tip_open"],
+            ergonomics_mapping["tip_touch"],
             self._thumb_flexion_tip_gamma,
-            open_deadband_rad=self._thumb_flexion_open_angle_deadband_rad,
         )
-        root_amount = _open_straightness_guard(
+        command[0] = _lerp_command(
+            ergonomics_mapping["root_open_cmd"],
+            ergonomics_mapping["root_touch_cmd"],
             root_amount,
-            landmarks[1],
-            landmarks[2],
-            landmarks[3],
-            landmarks[4],
-            self._thumb_flexion_open_straightness_threshold,
         )
-        tip_amount = _open_straightness_guard(
+        command[15] = _lerp_command(
+            ergonomics_mapping["tip_open_cmd"],
+            ergonomics_mapping["tip_touch_cmd"],
             tip_amount,
-            landmarks[1],
-            landmarks[2],
-            landmarks[3],
-            landmarks[4],
-            self._thumb_flexion_open_straightness_threshold,
         )
-        command[0] = _lerp_command(mapping["root_open_cmd"], mapping["root_touch_cmd"], root_amount)
-        command[15] = _lerp_command(mapping["tip_open_cmd"], mapping["tip_touch_cmd"], tip_amount)
 
     def _apply_thumb_ik(self, command: list[int], landmarks: np.ndarray) -> None:
         ik_command = self._thumb_segment_ik_command(command, landmarks)
@@ -942,37 +876,7 @@ class ManusL20RetargetNode(Node):
                 vector = self._thumb_segment_source_vector(landmarks)
                 amount = float(np.dot(vector - open_vector, span) / denominator)
                 return max(0.0, min(1.0, amount))
-
-        mapping = self._thumb_flexion_mapping
-        if mapping is None:
-            return None
-        root_sign = mapping["root_direction_sign"]
-        tip_sign = mapping["tip_direction_sign"]
-        root_angle = (
-            _joint_flexion_rad(landmarks[1], landmarks[2], landmarks[3])
-            if root_sign is None
-            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=True) * float(root_sign))
-        )
-        tip_angle = (
-            _joint_flexion_rad(landmarks[2], landmarks[3], landmarks[4])
-            if tip_sign is None
-            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=False) * float(tip_sign))
-        )
-        root_amount = _normalized_angle(
-            root_angle,
-            mapping["root_open_rad"],
-            mapping["root_touch_rad"],
-            self._thumb_flexion_root_gamma,
-            open_deadband_rad=self._thumb_flexion_open_angle_deadband_rad,
-        )
-        tip_amount = _normalized_angle(
-            tip_angle,
-            mapping["tip_open_rad"],
-            mapping["tip_touch_rad"],
-            self._thumb_flexion_tip_gamma,
-            open_deadband_rad=self._thumb_flexion_open_angle_deadband_rad,
-        )
-        return max(root_amount, tip_amount)
+        return None
 
     @staticmethod
     def _thumb_segment_progress_gate(progress: float | None, start: float, end: float) -> float:

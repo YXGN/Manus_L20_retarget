@@ -15,11 +15,6 @@ from rclpy.node import Node
 
 from .manus_landmarks import manus_raw_nodes_to_mediapipe_landmarks
 from .manus_l20_retarget_node import (
-    DEFAULT_ROOT_CLOSED_RAD,
-    DEFAULT_ROOT_OPEN_RAD,
-    DEFAULT_TIP_CLOSED_RAD,
-    DEFAULT_TIP_OPEN_RAD,
-    FINGER_LANDMARKS,
     STANDARD_FIST_COMMAND,
     STANDARD_OPEN_COMMAND,
     THUMB_COMMAND_SLOTS,
@@ -32,16 +27,15 @@ from .manus_l20_retarget_node import (
     _frame_rotation_from_two_vectors,
     _lerp_command,
     _manus_thumb_local_point_at,
-    _normalized_angle,
     _normalized_signed_segment,
     _optional_vector3_parameter,
-    _rotation_between,
     _scale_command_delta,
     _scale_command_delta_ease_in_with_deadzone,
-    _unit_vector,
 )
 from .mapping import clamp_u8
-from .retarget_pipeline import _directed_finger_flexion_rad, _joint_flexion_rad
+from .retarget_pipeline import (
+    _normalized_calibration_value,
+)
 
 
 IDENTITY_MAT = np.eye(3, dtype=np.float64).reshape(-1)
@@ -59,30 +53,19 @@ class L20SimulationNode(Node):
 
         self._neutral_command = list(STANDARD_OPEN_COMMAND)
         self._closed_command = list(STANDARD_FIST_COMMAND)
-        self._root_open_rad = list(DEFAULT_ROOT_OPEN_RAD)
-        self._root_closed_rad = list(DEFAULT_ROOT_CLOSED_RAD)
-        self._tip_open_rad = list(DEFAULT_TIP_OPEN_RAD)
-        self._tip_closed_rad = list(DEFAULT_TIP_CLOSED_RAD)
-        self._root_flexion_direction_sign: list[float] | None = None
-        self._tip_flexion_direction_sign: list[float] | None = None
         self._finger_yaw_mapping: dict[str, Any] | None = None
+        self._finger_flexion_ergonomics_mapping: dict[str, Any] | None = None
         self._thumb_segment_robot_open_command = _command_parameter(
             args.thumb_segment_robot_open_command,
             STANDARD_OPEN_COMMAND,
         )
-        self._thumb_flexion_mapping: dict[str, float | int] | None = None
-        self._segment_open_samples: list[np.ndarray] = []
-        self._segment_open_start_time: float | None = None
+        self._thumb_flexion_ergonomics_mapping: dict[str, Any] | None = None
         self._segment_open_rotation: np.ndarray | None = None
         self._segment_frame_data = self._load_segment_frame(args.segment_frame_path)
-        self._segment_manus_open_vector = self._load_segment_open_vector(
-            args.segment_manus_open_vector,
-            args.segment_manus_open_vector_path,
-        )
 
-        self._load_flexion_calibration(args.flexion_calibration_path)
         self._load_finger_yaw_calibration(args.finger_yaw_calibration_path)
-        self._load_thumb_flexion_mapping(args.thumb_flexion_mapping_path)
+        self._load_finger_flexion_ergonomics_calibration(args.finger_flexion_ergonomics_calibration_path)
+        self._load_thumb_flexion_ergonomics_mapping(args.thumb_flexion_ergonomics_mapping_path)
         self._load_l20_thumb_ik()
         self._viewer = self._launch_viewer()
         self.create_subscription(ManusGlove, args.topic, self._on_glove, 10)
@@ -96,81 +79,47 @@ class L20SimulationNode(Node):
                 "red=L20 solved segment end, yellow=residual"
             )
 
-    def _load_flexion_calibration(self, path_value: str) -> None:
+    def _load_finger_flexion_ergonomics_calibration(self, path_value: str) -> None:
         path_text = str(path_value).strip()
         if not path_text:
-            return
+            raise RuntimeError("--finger-flexion-ergonomics-calibration-path is required")
         path = Path(path_text).expanduser().resolve()
         if not path.exists():
-            self.get_logger().warning(f"visual flexion calibration not found: {path}")
-            return
+            raise RuntimeError(f"visual finger ergonomics flexion calibration not found: {path}")
         try:
             with path.open("r", encoding="utf-8") as handle:
                 data = yaml.safe_load(handle) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            self.get_logger().warning(f"failed to load visual flexion calibration {path}: {exc}")
-            return
-
-        self._root_open_rad = _float_list_parameter(
-            data.get("root_flexion_open_rad"),
-            self._root_open_rad,
-            length=5,
-        )
-        self._root_closed_rad = _float_list_parameter(
-            data.get("root_flexion_closed_rad"),
-            self._root_closed_rad,
-            length=5,
-        )
-        self._tip_open_rad = _float_list_parameter(
-            data.get("tip_flexion_open_rad"),
-            self._tip_open_rad,
-            length=5,
-        )
-        self._tip_closed_rad = _float_list_parameter(
-            data.get("tip_flexion_closed_rad"),
-            self._tip_closed_rad,
-            length=5,
-        )
-        samples = data.get("samples")
-        open_sample = samples.get("open") if isinstance(samples, dict) else None
-        fist_sample = samples.get("four_finger_fist") if isinstance(samples, dict) else None
-        has_signed_samples = (
-            isinstance(open_sample, dict)
-            and isinstance(fist_sample, dict)
-            and "root_signed_rad" in open_sample
-            and "root_signed_rad" in fist_sample
-            and "tip_signed_rad" in open_sample
-            and "tip_signed_rad" in fist_sample
-        )
-        self._root_flexion_direction_sign = (
-            _float_list_parameter(data.get("root_flexion_direction_sign"), [1.0] * 5, length=5)
-            if has_signed_samples and data.get("root_flexion_direction_sign") is not None
-            else None
-        )
-        self._tip_flexion_direction_sign = (
-            _float_list_parameter(data.get("tip_flexion_direction_sign"), [1.0] * 5, length=5)
-            if has_signed_samples and data.get("tip_flexion_direction_sign") is not None
-            else None
-        )
-
-        command_data = data.get("command")
-        if isinstance(command_data, dict):
+            samples = data["samples"]
+            command_data = data["command"]
+            open_sample = samples["natural_open"]
+            fist_sample = samples["four_finger_fist"]
+            root_keys = data["root_ergonomics_keys"]
+            tip_key_groups = data["tip_ergonomics_key_groups"]
+            if not (len(root_keys) == len(tip_key_groups) == 4):
+                raise ValueError("expected four finger ergonomics entries")
+            mapping = {
+                "root_keys": [str(key) for key in root_keys],
+                "tip_key_groups": [[str(key) for key in group] for group in tip_key_groups],
+                "root_open": _float_list_parameter(open_sample["root_value"], [], length=4),
+                "root_closed": _float_list_parameter(fist_sample["root_value"], [], length=4),
+                "tip_open": _float_list_parameter(open_sample["tip_value"], [], length=4),
+                "tip_closed": _float_list_parameter(fist_sample["tip_value"], [], length=4),
+            }
+            if any(len(mapping[key]) != 4 for key in ("root_open", "root_closed", "tip_open", "tip_closed")):
+                raise ValueError("missing calibrated ergonomics values")
             open_command = _command_parameter(command_data.get("open_command"), self._neutral_command)
-            four_closed = _command_parameter(
+            closed_command = _command_parameter(
                 command_data.get("four_finger_closed_command"),
                 self._closed_command,
             )
-            for slot in (1, 2, 3, 4, 16, 17, 18, 19):
-                self._neutral_command[slot] = open_command[slot]
-                self._closed_command[slot] = four_closed[slot]
+        except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError) as exc:
+            raise RuntimeError(f"invalid visual finger ergonomics flexion calibration {path}: {exc}") from exc
 
-        self.get_logger().info(
-            "loaded visual flexion calibration "
-            f"path={path}, root_open={np.round(self._root_open_rad, 5).tolist()}, "
-            f"root_closed={np.round(self._root_closed_rad, 5).tolist()}, "
-            f"tip_open={np.round(self._tip_open_rad, 5).tolist()}, "
-            f"tip_closed={np.round(self._tip_closed_rad, 5).tolist()}"
-        )
+        self._finger_flexion_ergonomics_mapping = mapping
+        for slot in (1, 2, 3, 4, 16, 17, 18, 19):
+            self._neutral_command[slot] = open_command[slot]
+            self._closed_command[slot] = closed_command[slot]
+        self.get_logger().info(f"loaded visual finger ergonomics flexion calibration path={path}")
 
     def _load_finger_yaw_calibration(self, path_value: str) -> None:
         path_text = str(path_value).strip()
@@ -238,131 +187,54 @@ class L20SimulationNode(Node):
             f"spread_cmd={self._finger_yaw_mapping['spread_cmd']}"
         )
 
-    def _load_thumb_flexion_mapping(self, path_value: str) -> None:
+    def _load_thumb_flexion_ergonomics_mapping(self, path_value: str) -> None:
         path_text = str(path_value).strip()
         if not path_text:
-            return
+            raise RuntimeError("--thumb-flexion-ergonomics-mapping-path is required")
         path = Path(path_text).expanduser().resolve()
         if not path.exists():
-            self.get_logger().warning(f"thumb flexion mapping not found: {path}")
-            return
+            raise RuntimeError(f"visual thumb ergonomics flexion mapping not found: {path}")
         try:
             with path.open("r", encoding="utf-8") as handle:
                 data = yaml.safe_load(handle) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            self.get_logger().warning(f"failed to load thumb flexion mapping {path}: {exc}")
-            return
-
-        samples = data.get("samples")
-        command_data = data.get("command")
-        if not isinstance(samples, dict) or not isinstance(command_data, dict):
-            self.get_logger().warning(f"invalid thumb flexion mapping file: {path}")
-            return
-        open_sample = samples.get("thumb_natural_open")
-        touch_sample = samples.get("thumb_pinky_root_touch")
-        if not isinstance(open_sample, dict) or not isinstance(touch_sample, dict):
-            self.get_logger().warning(f"thumb flexion mapping missing required samples: {path}")
-            return
-
-        open_command = _command_parameter(command_data.get("thumb_natural_open_command"), self._neutral_command)
-        touch_command = _command_parameter(command_data.get("thumb_pinky_root_touch_command"), self._neutral_command)
-        try:
-            self._thumb_flexion_mapping = {
-                "root_open_rad": float(open_sample["root_rad"]),
-                "root_touch_rad": float(touch_sample["root_rad"]),
-                "tip_open_rad": float(open_sample["tip_rad"]),
-                "tip_touch_rad": float(touch_sample["tip_rad"]),
-                "root_direction_sign": (
-                    float(data["root_flexion_direction_sign"])
-                    if data.get("root_flexion_direction_sign") is not None
-                    else None
-                ),
-                "tip_direction_sign": (
-                    float(data["tip_flexion_direction_sign"])
-                    if data.get("tip_flexion_direction_sign") is not None
-                    else None
-                ),
-                "root_open_cmd": int(open_command[0]),
-                "root_touch_cmd": int(touch_command[0]),
-                "tip_open_cmd": int(open_command[15]),
-                "tip_touch_cmd": int(touch_command[15]),
+            samples = data["samples"]
+            command_data = data["command"]
+            open_sample = samples["thumb_natural_open"]
+            touch_sample = samples["thumb_pinky_root_touch"]
+            mapping = {
+                "root_key": str(data["root_ergonomics_key"]),
+                "tip_keys": [str(key) for key in data["tip_ergonomics_keys"]],
+                "root_open": float(open_sample["root_value"]),
+                "root_touch": float(touch_sample["root_value"]),
+                "tip_open": float(open_sample["tip_value"]),
+                "tip_touch": float(touch_sample["tip_value"]),
             }
-        except (KeyError, TypeError, ValueError) as exc:
-            self.get_logger().warning(f"invalid thumb flexion mapping values in {path}: {exc}")
-            self._thumb_flexion_mapping = None
-            return
-        self.get_logger().info(
-            "loaded visual thumb flexion mapping "
-            f"path={path}, "
-            f"root_rad=[{self._thumb_flexion_mapping['root_open_rad']:.5f}, "
-            f"{self._thumb_flexion_mapping['root_touch_rad']:.5f}], "
-            f"tip_rad=[{self._thumb_flexion_mapping['tip_open_rad']:.5f}, "
-            f"{self._thumb_flexion_mapping['tip_touch_rad']:.5f}], "
-            f"root_cmd=[{self._thumb_flexion_mapping['root_open_cmd']}, "
-            f"{self._thumb_flexion_mapping['root_touch_cmd']}], "
-            f"tip_cmd=[{self._thumb_flexion_mapping['tip_open_cmd']}, "
-            f"{self._thumb_flexion_mapping['tip_touch_cmd']}]"
-        )
-
-    def _load_segment_open_vector(self, inline_value: str, path_value: str) -> np.ndarray | None:
-        inline_vector = _optional_vector3_parameter(inline_value)
-        if inline_vector is not None:
-            self.get_logger().info(
-                "using inline MANUS thumb segment open vector "
-                f"{np.round(inline_vector, 6).tolist()}"
+            if not mapping["tip_keys"]:
+                raise ValueError("missing thumb tip ergonomics keys")
+            open_command = _command_parameter(command_data.get("thumb_natural_open_command"), self._neutral_command)
+            touch_command = _command_parameter(
+                command_data.get("thumb_pinky_root_touch_command"),
+                self._neutral_command,
             )
-            return inline_vector
+            mapping.update(
+                root_open_cmd=int(open_command[0]),
+                root_touch_cmd=int(touch_command[0]),
+                tip_open_cmd=int(open_command[15]),
+                tip_touch_cmd=int(touch_command[15]),
+            )
+        except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError) as exc:
+            raise RuntimeError(f"invalid visual thumb ergonomics flexion mapping {path}: {exc}") from exc
 
+        self._thumb_flexion_ergonomics_mapping = mapping
+        self.get_logger().info(f"loaded visual thumb ergonomics flexion mapping path={path}")
+
+    def _load_segment_frame(self, path_value: str) -> dict[str, Any]:
         path_text = str(path_value).strip()
         if not path_text:
-            return None
+            raise RuntimeError("--segment-frame-path is required")
         path = Path(path_text).expanduser()
         if not path.exists():
-            self.get_logger().info(
-                f"thumb segment open vector file not found: {path}; "
-                "visualizer will use startup open alignment"
-            )
-            return None
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                data = yaml.safe_load(handle) or {}
-            vector = _optional_vector3_parameter(data.get("manus_open_vector"))
-            if vector is None:
-                raise ValueError("missing manus_open_vector")
-            segment_start = data.get("segment_start")
-            segment_end = data.get("segment_end")
-            if segment_start is not None and int(segment_start) != self._args.segment_start:
-                self.get_logger().warning(
-                    f"open vector segment_start={segment_start} does not match "
-                    f"--segment-start={self._args.segment_start}"
-                )
-            if segment_end is not None and int(segment_end) != self._args.segment_end:
-                self.get_logger().warning(
-                    f"open vector segment_end={segment_end} does not match "
-                    f"--segment-end={self._args.segment_end}"
-                )
-            self.get_logger().info(
-                f"loaded MANUS thumb segment open vector path={path}, "
-                f"vector={np.round(vector, 6).tolist()}"
-            )
-            return vector
-        except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
-            self.get_logger().warning(
-                f"failed to load thumb segment open vector from {path}: {exc}; "
-                "visualizer will use startup open alignment"
-            )
-            return None
-
-    def _load_segment_frame(self, path_value: str) -> dict[str, Any] | None:
-        path_text = str(path_value).strip()
-        if not path_text:
-            return None
-        path = Path(path_text).expanduser()
-        if not path.exists():
-            self.get_logger().info(
-                f"thumb segment frame file not found: {path}; visualizer will use open-vector alignment"
-            )
-            return None
+            raise RuntimeError(f"thumb segment frame file not found: {path}")
         try:
             with path.open("r", encoding="utf-8") as handle:
                 data = yaml.safe_load(handle) or {}
@@ -378,10 +250,7 @@ class L20SimulationNode(Node):
                 "robot_touch_command": _command_parameter(data.get("robot_touch_command"), self._thumb_segment_robot_open_command),
             }
         except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
-            self.get_logger().warning(
-                f"failed to load thumb segment frame from {path}: {exc}; visualizer will use open-vector alignment"
-            )
-            return None
+            raise RuntimeError(f"failed to load thumb segment frame from {path}: {exc}") from exc
 
     def _load_l20_thumb_ik(self) -> None:
         thumb_ik_root = Path(self._args.l20_thumb_ik_root).expanduser().resolve()
@@ -424,9 +293,7 @@ class L20SimulationNode(Node):
         robot_touch = self._robot_segment_vector_for_command(data["robot_touch_command"])
         rotation = _frame_rotation_from_two_vectors(manus_open, manus_touch, robot_open, robot_touch)
         if rotation is None:
-            self.get_logger().warning("thumb segment frame is degenerate; visualizer will use open-vector alignment")
-            self._segment_frame_data = None
-            return
+            raise RuntimeError("thumb segment frame is degenerate")
         self._segment_open_rotation = rotation
         self.get_logger().info(
             f"initialized visual thumb segment frame path={data['path']}, "
@@ -475,7 +342,7 @@ class L20SimulationNode(Node):
             transform=self._args.transform,
         )
         ergonomics = {str(entry.type): float(entry.value) for entry in msg.ergonomics if entry.type}
-        base_command = self._base_command(landmarks, ergonomics)
+        base_command = self._base_command(ergonomics)
         base_qpos = self._adapter.sdk_range_to_qpos(base_command)
         target_vector = self._thumb_segment_target_vector(landmarks)
         raw_qpos = self._thumb_segment_ik.solve_target(
@@ -536,85 +403,74 @@ class L20SimulationNode(Node):
                 f"base_thumb={[base_command[index] for index in THUMB_COMMAND_SLOTS]}"
             )
 
-    def _base_command(self, landmarks: np.ndarray, ergonomics: dict[str, float]) -> list[int]:
+    def _base_command(self, ergonomics: dict[str, float]) -> list[int]:
         command = list(self._neutral_command)
         if self._args.show_fingers:
-            self._apply_visual_finger_flexion(command, landmarks)
+            self._apply_visual_finger_ergonomics_flexion(command, ergonomics)
             if self._args.finger_yaw:
                 self._apply_visual_finger_yaw(command, ergonomics)
 
-        mapping = self._thumb_flexion_mapping
-        if mapping is None:
-            return command
-
-        root_sign = mapping["root_direction_sign"]
-        tip_sign = mapping["tip_direction_sign"]
-        root_angle = (
-            _joint_flexion_rad(landmarks[1], landmarks[2], landmarks[3])
-            if root_sign is None
-            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=True) * float(root_sign))
-        )
-        tip_angle = (
-            _joint_flexion_rad(landmarks[2], landmarks[3], landmarks[4])
-            if tip_sign is None
-            else max(0.0, _directed_finger_flexion_rad(landmarks, 0, root=False) * float(tip_sign))
-        )
-        root_amount = _normalized_angle(
-            root_angle,
-            float(mapping["root_open_rad"]),
-            float(mapping["root_touch_rad"]),
+        ergonomics_mapping = self._thumb_flexion_ergonomics_mapping
+        if ergonomics_mapping is None:
+            raise RuntimeError("thumb ergonomics flexion mapping was not loaded")
+        root_value = float(ergonomics[ergonomics_mapping["root_key"]])
+        tip_value = sum(float(ergonomics[key]) for key in ergonomics_mapping["tip_keys"])
+        root_amount = _normalized_calibration_value(
+            root_value,
+            float(ergonomics_mapping["root_open"]),
+            float(ergonomics_mapping["root_touch"]),
             self._args.thumb_root_gamma,
         )
-        tip_amount = _normalized_angle(
-            tip_angle,
-            float(mapping["tip_open_rad"]),
-            float(mapping["tip_touch_rad"]),
+        tip_amount = _normalized_calibration_value(
+            tip_value,
+            float(ergonomics_mapping["tip_open"]),
+            float(ergonomics_mapping["tip_touch"]),
             self._args.thumb_tip_gamma,
         )
-        command[0] = _lerp_command(int(mapping["root_open_cmd"]), int(mapping["root_touch_cmd"]), root_amount)
-        command[15] = _lerp_command(int(mapping["tip_open_cmd"]), int(mapping["tip_touch_cmd"]), tip_amount)
+        command[0] = _lerp_command(
+            int(ergonomics_mapping["root_open_cmd"]),
+            int(ergonomics_mapping["root_touch_cmd"]),
+            root_amount,
+        )
+        command[15] = _lerp_command(
+            int(ergonomics_mapping["tip_open_cmd"]),
+            int(ergonomics_mapping["tip_touch_cmd"]),
+            tip_amount,
+        )
         return command
 
-    def _apply_visual_finger_flexion(self, command: list[int], landmarks: np.ndarray) -> None:
-        for finger_index, (mcp, pip, dip, tip) in enumerate(FINGER_LANDMARKS):
-            if finger_index == 0:
-                continue
-            if self._root_flexion_direction_sign is None:
-                root_angle = _joint_flexion_rad(landmarks[mcp], landmarks[pip], landmarks[dip])
-            else:
-                root_angle = max(
-                    0.0,
-                    _directed_finger_flexion_rad(landmarks, finger_index, root=True)
-                    * float(self._root_flexion_direction_sign[finger_index]),
-                )
-            if self._tip_flexion_direction_sign is None:
-                tip_angle = _joint_flexion_rad(landmarks[pip], landmarks[dip], landmarks[tip])
-            else:
-                tip_angle = max(
-                    0.0,
-                    _directed_finger_flexion_rad(landmarks, finger_index, root=False)
-                    * float(self._tip_flexion_direction_sign[finger_index]),
-                )
-            root_amount = _normalized_angle(
-                root_angle,
-                self._root_open_rad[finger_index],
-                self._root_closed_rad[finger_index],
+    def _apply_visual_finger_ergonomics_flexion(
+        self,
+        command: list[int],
+        ergonomics: dict[str, float],
+    ) -> None:
+        mapping = self._finger_flexion_ergonomics_mapping
+        if mapping is None:
+            return
+        for local_index, root_key in enumerate(mapping["root_keys"]):
+            root_value = float(ergonomics[root_key])
+            tip_value = sum(float(ergonomics[key]) for key in mapping["tip_key_groups"][local_index])
+            root_amount = _normalized_calibration_value(
+                root_value,
+                mapping["root_open"][local_index],
+                mapping["root_closed"][local_index],
                 self._args.root_gamma,
             )
-            tip_amount = _normalized_angle(
-                tip_angle,
-                self._tip_open_rad[finger_index],
-                self._tip_closed_rad[finger_index],
+            tip_amount = _normalized_calibration_value(
+                tip_value,
+                mapping["tip_open"][local_index],
+                mapping["tip_closed"][local_index],
                 self._args.tip_gamma,
             )
-            command[finger_index] = _lerp_command(
-                self._neutral_command[finger_index],
-                self._closed_command[finger_index],
+            slot = local_index + 1
+            command[slot] = _lerp_command(
+                self._neutral_command[slot],
+                self._closed_command[slot],
                 root_amount,
             )
-            command[15 + finger_index] = _lerp_command(
-                self._neutral_command[15 + finger_index],
-                self._closed_command[15 + finger_index],
+            command[15 + slot] = _lerp_command(
+                self._neutral_command[15 + slot],
+                self._closed_command[15 + slot],
                 tip_amount,
             )
 
@@ -677,46 +533,12 @@ class L20SimulationNode(Node):
 
     def _align_segment_open(self, vector: np.ndarray) -> np.ndarray:
         vector = np.asarray(vector, dtype=np.float64)
-        if not self._args.segment_align_open:
-            return vector
-        unit = _unit_vector(vector)
-        if unit is None:
-            return vector
-        if self._segment_open_rotation is not None:
-            return self._segment_open_rotation @ vector
-
-        if self._segment_manus_open_vector is not None:
-            open_unit = _unit_vector(self._segment_manus_open_vector)
-            robot_open_unit = _unit_vector(self._thumb_segment_ik.robot_open_segment_vector)
-            if open_unit is None or robot_open_unit is None:
-                self._segment_open_rotation = np.eye(3, dtype=np.float64)
-            else:
-                self._segment_open_rotation = _rotation_between(open_unit, robot_open_unit)
-            return self._segment_open_rotation @ vector
-
-        now = time.monotonic()
-        if self._segment_open_start_time is None:
-            self._segment_open_start_time = now
-        self._segment_open_samples.append(unit)
-        if now - self._segment_open_start_time < self._args.segment_open_calibration_sec:
-            return self._thumb_segment_ik.robot_open_segment_vector.copy()
-
-        open_unit = _unit_vector(np.mean(np.asarray(self._segment_open_samples, dtype=np.float64), axis=0))
-        robot_open_unit = _unit_vector(self._thumb_segment_ik.robot_open_segment_vector)
-        if open_unit is None or robot_open_unit is None:
-            self._segment_open_rotation = np.eye(3, dtype=np.float64)
-        else:
-            self._segment_open_rotation = _rotation_between(open_unit, robot_open_unit)
+        if self._segment_open_rotation is None:
+            raise RuntimeError("thumb segment frame rotation was not initialized")
         return self._segment_open_rotation @ vector
 
     def _segment_align_status(self) -> str:
-        if not self._args.segment_align_open:
-            return "off"
-        if self._segment_frame_data is not None:
-            return "frame" if self._segment_open_rotation is not None else "frame_pending"
-        if self._segment_manus_open_vector is not None:
-            return "fixed" if self._segment_open_rotation is not None else "fixed_pending"
-        return "done" if self._segment_open_rotation is not None else "calibrating"
+        return "two_pose_frame" if self._segment_open_rotation is not None else "frame_pending"
 
     def _draw_overlay(self, scene: Any, origin: np.ndarray, target: np.ndarray, actual: np.ndarray) -> None:
         scene.ngeom = 0
@@ -787,24 +609,23 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--show-fingers", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--thumb-debug", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--flexion-calibration-path", default="")
+    parser.add_argument(
+        "--finger-flexion-ergonomics-calibration-path",
+        default=str(retarget_config / "finger_flexion_ergonomics_right_calibration.yaml"),
+    )
     parser.add_argument("--finger-yaw", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--finger-yaw-calibration-path",
         default=str(retarget_config / "finger_yaw_ergonomics_right_calibration.yaml"),
     )
     parser.add_argument(
-        "--thumb-flexion-mapping-path",
-        default=str(retarget_config / "thumb_right_flexion_mapping.yaml"),
+        "--thumb-flexion-ergonomics-mapping-path",
+        default=str(retarget_config / "thumb_right_flexion_ergonomics_mapping.yaml"),
     )
     parser.add_argument("--segment-start", type=int, default=2)
     parser.add_argument("--segment-end", type=int, default=3)
     parser.add_argument("--segment-map-mode", choices=("raw", "mapped"), default="raw", help=argparse.SUPPRESS)
-    parser.add_argument("--segment-align-open", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--segment-open-calibration-sec", type=float, default=1.0)
     parser.add_argument("--segment-frame-path", default=str(retarget_config / "thumb_segment_frame_right.yaml"))
-    parser.add_argument("--segment-manus-open-vector", default="")
-    parser.add_argument("--segment-manus-open-vector-path", default="")
     parser.add_argument("--segment-scale", type=float, default=1.0)
     parser.add_argument("--segment-damping", type=float, default=8e-4)
     parser.add_argument("--segment-max-step", type=float, default=0.20)
