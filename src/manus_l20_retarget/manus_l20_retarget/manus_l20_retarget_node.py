@@ -17,6 +17,13 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 
+from .contact_semantics import (
+    FingertipContactConfig,
+    FingertipContactStateMachine,
+    blend_fingertip_contact_command,
+    parse_fingertip_contact_config,
+    thumb_fingertip_distance_ratios,
+)
 from .mapping import clamp_u8
 from .manus_landmarks import _palm_frame
 from .retarget_pipeline import (
@@ -144,6 +151,9 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("thumb_segment_yaw_progress_gate_start", 0.0)
         self.declare_parameter("thumb_segment_yaw_progress_gate_end", 0.0)
         self.declare_parameter("landmark_transform", "right_glove_to_right_retarget")
+        self.declare_parameter("enable_fingertip_contact_semantics", False)
+        self.declare_parameter("fingertip_contact_semantics_path", "")
+        self.declare_parameter("fingertip_contact_debug", False)
 
         self._lock = threading.Lock()
         self._latest_msg: ManusGlove | None = None
@@ -178,6 +188,9 @@ class ManusL20RetargetNode(Node):
         self._finger_flexion_ergonomics_mapping: dict[str, Any] | None = None
         self._lock_neutral_slots = [index for index in self._lock_neutral_slots if index not in (0, 5, 10, 15)]
         self._thumb_flexion_ergonomics_mapping: dict[str, Any] | None = None
+        self._fingertip_contact_config: FingertipContactConfig | None = None
+        self._fingertip_contact_state: FingertipContactStateMachine | None = None
+        self._fingertip_contact_debug = bool(self.get_parameter("fingertip_contact_debug").value)
         self._thumb_flexion_root_gamma = max(
             0.05,
             float(self.get_parameter("thumb_flexion_root_gamma").value),
@@ -241,6 +254,10 @@ class ManusL20RetargetNode(Node):
         )
         self._apply_thumb_flexion_ergonomics_mapping_path(
             str(self.get_parameter("thumb_flexion_ergonomics_mapping_path").value)
+        )
+        self._apply_fingertip_contact_semantics_path(
+            str(self.get_parameter("fingertip_contact_semantics_path").value),
+            enabled=bool(self.get_parameter("enable_fingertip_contact_semantics").value),
         )
         self._root_gamma = max(0.05, float(self.get_parameter("root_gamma").value))
         self._tip_gamma = max(0.05, float(self.get_parameter("tip_gamma").value))
@@ -476,6 +493,36 @@ class ManusL20RetargetNode(Node):
             f"path={path}, root_key={mapping['root_key']}, tip_keys={mapping['tip_keys']}"
         )
 
+    def _apply_fingertip_contact_semantics_path(self, path_value: str, *, enabled: bool) -> None:
+        if not enabled:
+            self.get_logger().info("fingertip contact semantics disabled by launch parameter")
+            return
+        path_text = str(path_value).strip()
+        if not path_text:
+            raise RuntimeError("fingertip_contact_semantics_path is required when contact semantics is enabled")
+        path = Path(path_text).expanduser().resolve()
+        if not path.exists():
+            raise RuntimeError(f"fingertip contact semantics calibration not found: {path}")
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = yaml.safe_load(handle) or {}
+            runtime = data.get("runtime") if isinstance(data, dict) else None
+            if not isinstance(runtime, dict) or not bool(runtime.get("enabled", False)):
+                self.get_logger().warning(
+                    f"fingertip contact semantics remains disabled by runtime.enabled=false in {path}"
+                )
+                return
+            config = parse_fingertip_contact_config(data)
+        except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
+            raise RuntimeError(f"invalid fingertip contact semantics calibration {path}: {exc}") from exc
+        self._fingertip_contact_config = config
+        self._fingertip_contact_state = FingertipContactStateMachine(config)
+        self.get_logger().info(
+            "loaded fingertip contact semantics "
+            f"path={path}, pairs={list(config.profiles)}, hold={config.min_hold_sec:.3f}s, "
+            f"release={config.release_hold_sec:.3f}s"
+        )
+
     def _prepare_l20_thumb_ik_imports(self) -> None:
         thumb_ik_root = Path(str(self.get_parameter("l20_thumb_ik_root").value)).expanduser().resolve()
         src_path = thumb_ik_root / "src"
@@ -523,6 +570,7 @@ class ManusL20RetargetNode(Node):
     def _on_estop(self, msg: Bool) -> None:
         self._estop = bool(msg.data)
         if self._estop:
+            self._reset_fingertip_contact_semantics()
             self._last_command = list(self._neutral_command)
             self._publish(self._last_command)
 
@@ -532,12 +580,14 @@ class ManusL20RetargetNode(Node):
             last_msg_time = self._last_msg_time
 
         if self._estop:
+            self._reset_fingertip_contact_semantics()
             self._publish(self._neutral_command)
             return
 
         if msg is None:
             return
         if last_msg_time is not None and monotonic() - last_msg_time > self._watchdog_timeout:
+            self._reset_fingertip_contact_semantics()
             self._last_command = self._filter_command(self._neutral_command)
             self._publish(self._last_command)
             return
@@ -552,6 +602,10 @@ class ManusL20RetargetNode(Node):
         self._debug_thumb_segment_publish(command, filtered_command)
         self._last_command = filtered_command
         self._publish(self._last_command)
+
+    def _reset_fingertip_contact_semantics(self) -> None:
+        if self._fingertip_contact_state is not None:
+            self._fingertip_contact_state.reset()
 
     def _thumb_segment_frame_parameter(self, path_value: str) -> dict[str, Any] | None:
         path_text = str(path_value).strip()
@@ -663,6 +717,7 @@ class ManusL20RetargetNode(Node):
         self._apply_finger_yaw(command, features.ergonomics)
         self._apply_thumb_flexion_mapping(command, features.ergonomics)
         self._apply_thumb_ik(command, landmarks)
+        self._apply_fingertip_contact_semantics(command, features.skeleton)
         self._l20_command_adapter.apply_reserved_slots(command)
         self._l20_command_adapter.apply_neutral_locks(command)
         return command
@@ -754,6 +809,29 @@ class ManusL20RetargetNode(Node):
             self._thumb_segment_debug["smooth_cmd"] = [values[index] for index in THUMB_IK_COMMAND_SLOTS]
         for slot, value in values.items():
             command[slot] = value
+
+    def _apply_fingertip_contact_semantics(self, command: list[int], skeleton: Any) -> None:
+        config = self._fingertip_contact_config
+        state = self._fingertip_contact_state
+        if config is None or state is None:
+            return
+        try:
+            ratios = thumb_fingertip_distance_ratios(skeleton)
+            decision = state.update(ratios, monotonic())
+        except (AttributeError, TypeError, ValueError) as exc:
+            state.reset()
+            if self._fingertip_contact_debug:
+                self.get_logger().warning(f"fingertip contact frame ignored: {exc}")
+            return
+
+        if decision.pair is not None and decision.activation > 0.0:
+            profile = config.profiles[decision.pair]
+            command[:] = blend_fingertip_contact_command(command, profile, decision.activation)
+        if decision.event is not None and self._fingertip_contact_debug:
+            rounded_ratios = {finger: round(value, 4) for finger, value in decision.ratios.items()}
+            self.get_logger().info(
+                f"fingertip_contact {decision.event} activation={decision.activation:.3f} ratios={rounded_ratios}"
+            )
 
     def _thumb_segment_ik_command(self, base_command: list[int], landmarks: np.ndarray) -> list[int]:
         if self._adapter is None or self._thumb_segment_ik is None:

@@ -201,6 +201,50 @@ ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/thumb_*
 ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/thumb_segment_frame_*.yaml
 ```
 
+### 可选：指尖接触语义标定
+
+该功能识别四类人手接触：拇指指尖分别接触食指、中指、无名指和小指指尖。它不改变四指 ergonomics yaw，也不替代拇指两姿势 segment IK。
+
+每帧从 `ManusGlove.raw_nodes` 取 `Thumb.TIP` 和四个 `Finger.TIP`，计算：
+
+```text
+distance_ratio = ||Thumb.TIP - Finger.TIP|| / ||Index.MCP - Pinky.MCP||
+```
+
+分母是掌宽，因此不同佩戴距离和左右手镜像不会改变阈值尺度。采集命令只订阅 MANUS 话题，不会启动或发送 L20 真机命令：
+
+```bash
+ros2 run manus_l20_retarget calibration_capture fingertip-contact \
+  --hand right \
+  --glove-topic /manus_glove_0 \
+  --duration 2.0
+```
+
+左手把 `--hand` 改成 `left`，并使用对应 MANUS 话题。工具依次采集自然张开、拇指-食指指尖、拇指-中指指尖、拇指-无名指指尖、拇指-小指指尖五个姿势，生成：
+
+```text
+fingertip_contact_semantics_right.yaml
+fingertip_contact_semantics_left.yaml
+```
+
+该 YAML 内每对接触有两种独立信息：
+
+- `human`：自然张开距离 `natural_open_distance_p05_ratio` 与接触距离 `contact_distance_p95_ratio`。
+- `robot`：对应 L20 的 20-slot `contact_command`、本动作实际覆盖的 slot 和最大修正量。
+
+`runtime.takeover_start_progress` 是从自然张开向接触移动的比例。默认 `0.35` 表示距离完成该段行程的 35% 后开始接管；继续接近时，接管比例线性增加；达到接触距离时，完全接管当前接触动作。每个动作只覆盖拇指 Root/Tip（slot `0/15`）、当前接触手指 Root/Tip（slot `1/16`、`2/17`、`3/18` 或 `4/19`）以及拇指 Roll/Yaw（slot `5/10`）；其他手指的弯曲和所有四指 yaw 继续使用实时遥操值。
+
+采集会保留已有的 `contact_command`，但不会自动得到真机接触姿态。先在原有连续遥操模式下手动验证每个接触姿态，将确认后的 20-slot 命令填入对应 `contact_command`；每一个数字都保留 slot 注释。随后把 YAML 的 `runtime.enabled` 改为 `true`。
+
+接触语义默认不启用。完成上述人工确认后，用户手动在启动命令中增加：
+
+```bash
+enable_fingertip_contact_semantics:=true \
+fingertip_contact_debug:=true
+```
+
+接触在起始区间内稳定后，上述局部 slot 会随指尖接近程度平滑增强；松开并离开起始区间后恢复当前连续控制链路。
+
 ## 6. 启动双手遥操作
 
 确认已完成：

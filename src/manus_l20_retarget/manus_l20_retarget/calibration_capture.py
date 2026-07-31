@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import statistics
 import threading
 import time
@@ -12,7 +13,12 @@ import yaml
 from manus_ros2_msgs.msg import ManusGlove
 from rclpy.node import Node
 
-from .manus_landmarks import manus_raw_nodes_to_mediapipe_landmarks
+from .contact_semantics import (
+    FINGERTIP_CONTACT_FINGERS,
+    FINGERTIP_CONTACT_SLOTS,
+    thumb_fingertip_distance_ratios,
+)
+from .manus_landmarks import manus_raw_nodes_to_hand_skeleton, manus_raw_nodes_to_mediapipe_landmarks
 from .manus_l20_retarget_node import (
     STANDARD_OPEN_COMMAND,
     _command_parameter,
@@ -216,6 +222,63 @@ class FullCalibrationCapture(Node):
         }
 
 
+class FingertipContactCapture(Node):
+    """Capture raw-skeleton thumb-to-fingertip distance samples without commanding L20."""
+
+    def __init__(self, glove_topic: str, transform: str) -> None:
+        super().__init__("manus_l20_fingertip_contact_calibration_capture")
+        self._transform = transform
+        self._lock = threading.Lock()
+        self._collecting = False
+        self._samples: list[dict[str, float]] = []
+        self._discarded_frames = 0
+        self._last_invalid_frame_warning_sec = float("-inf")
+        self.create_subscription(ManusGlove, glove_topic, self._on_glove, 10)
+
+    def _on_glove(self, msg: ManusGlove) -> None:
+        try:
+            skeleton = manus_raw_nodes_to_hand_skeleton(msg.raw_nodes, transform=self._transform)
+            ratios = thumb_fingertip_distance_ratios(skeleton)
+        except (AttributeError, TypeError, ValueError) as exc:
+            now_sec = time.monotonic()
+            with self._lock:
+                if not self._collecting:
+                    return
+                self._discarded_frames += 1
+                warn = now_sec - self._last_invalid_frame_warning_sec >= 1.0
+                if warn:
+                    self._last_invalid_frame_warning_sec = now_sec
+            if warn:
+                self.get_logger().warning(
+                    f"ignoring incomplete MANUS raw skeleton frame during fingertip-contact capture: {exc}"
+                )
+            return
+        with self._lock:
+            if self._collecting:
+                self._samples.append(ratios)
+
+    def capture(self, duration_sec: float) -> dict[str, list[float]]:
+        with self._lock:
+            self._samples = []
+            self._discarded_frames = 0
+            self._collecting = True
+        time.sleep(duration_sec)
+        with self._lock:
+            self._collecting = False
+            samples = list(self._samples)
+            discarded_frames = self._discarded_frames
+        if not samples:
+            raise RuntimeError(
+                "no complete MANUS raw-skeleton samples captured "
+                f"in {duration_sec:.1f}s; discarded {discarded_frames} incomplete frames. "
+                "Verify that the MANUS glove is connected and raw skeleton streaming is enabled."
+            )
+        return {
+            finger: [float(sample[finger]) for sample in samples if finger in sample]
+            for finger in FINGERTIP_CONTACT_FINGERS
+        }
+
+
 def _mean_vector(samples: list[list[float]]) -> list[float]:
     length = min(len(sample) for sample in samples)
     return [
@@ -403,6 +466,94 @@ def _build_thumb_flexion_ergonomics_calibration(
             },
         },
     }
+
+
+def _build_fingertip_contact_calibration(
+    samples: dict[str, dict[str, list[float]]],
+    output_path: str,
+    *,
+    min_hold_sec: float,
+    release_hold_sec: float,
+    candidate_gap_ratio: float,
+    takeover_start_progress: float,
+    activation_rise_sec: float,
+    activation_release_sec: float,
+    robot_commands: dict[str, list[int]],
+    max_command_delta: int,
+) -> dict[str, Any]:
+    open_samples = samples["natural_open"]
+    contacts: dict[str, Any] = {}
+    for finger in FINGER_NAMES:
+        contact_samples = samples[f"thumb_{finger}_tip_touch"][finger]
+        open_values = open_samples[finger]
+        if not contact_samples or not open_values:
+            raise RuntimeError(f"no fingertip distance samples for {finger}")
+        contact_median = _percentile(contact_samples, 0.50)
+        contact_p95 = _percentile(contact_samples, 0.95)
+        open_p05 = _percentile(open_values, 0.05)
+        if open_p05 <= contact_p95:
+            raise RuntimeError(
+                f"{finger} contact and natural-open raw distances overlap; recapture with a clearer open hand"
+            )
+        contacts[finger] = {
+            "human": {
+                "natural_open_distance_p05_ratio": round(open_p05, 6),
+                "contact_distance_median_ratio": round(contact_median, 6),
+                "contact_distance_p95_ratio": round(contact_p95, 6),
+            },
+            "robot": {
+                "override_slots": list(_fingertip_contact_slots(finger)),
+                "max_command_delta": int(max_command_delta),
+                "contact_command": robot_commands[finger],
+            },
+        }
+    return {
+        "schema": "manus_l20.fingertip_contact_semantics.v2",
+        "source": {
+            "kind": "raw_skeleton_tip_distance",
+            "numerator": "Thumb.TIP to Finger.TIP",
+            "denominator": "Index.MCP to Pinky.MCP",
+            "unit": "palm_width_ratio",
+        },
+        "runtime": {
+            "enabled": False,
+            "min_hold_sec": round(float(min_hold_sec), 4),
+            "release_hold_sec": round(float(release_hold_sec), 4),
+            "candidate_gap_ratio": round(float(candidate_gap_ratio), 6),
+            "takeover_start_progress": round(float(takeover_start_progress), 4),
+            "activation_rise_sec": round(float(activation_rise_sec), 4),
+            "activation_release_sec": round(float(activation_release_sec), 4),
+        },
+        "contacts": contacts,
+    }
+
+
+def _fingertip_contact_slots(finger: str) -> tuple[int, ...]:
+    return FINGERTIP_CONTACT_SLOTS[finger]
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        raise ValueError("cannot calculate percentile for an empty sample")
+    position = max(0.0, min(1.0, float(fraction))) * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+
+def _existing_fingertip_contact_command(path: str, finger: str, fallback: list[int]) -> list[int]:
+    try:
+        with Path(path).expanduser().open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    except (OSError, yaml.YAMLError):
+        return list(fallback)
+    contacts = data.get("contacts") if isinstance(data, dict) else None
+    entry = contacts.get(finger) if isinstance(contacts, dict) else None
+    robot = entry.get("robot") if isinstance(entry, dict) else None
+    if not isinstance(robot, dict):
+        return list(fallback)
+    return _command_parameter(robot.get("contact_command"), fallback)
 
 
 def _spin_capture_node(node: Node) -> threading.Thread:
@@ -601,6 +752,98 @@ def run_thumb_frame(parsed: argparse.Namespace) -> None:
         _shutdown_capture_node(node, spin_thread)
 
 
+def run_fingertip_contact(parsed: argparse.Namespace) -> None:
+    _validate_fingertip_contact_args(parsed)
+    hand = str(parsed.hand).strip().lower()
+    transform = str(parsed.transform)
+    if hand == "left" and transform == "right_glove_to_right_retarget":
+        transform = "left_glove_to_right_retarget"
+    output = _config_output_path(hand, "fingertip_contact_semantics_{hand}.yaml", parsed.output)
+    robot_commands: dict[str, list[int]] = {}
+    for finger in FINGER_NAMES:
+        explicit = _command_parameter(getattr(parsed, f"{finger}_contact_command"), [])
+        robot_commands[finger] = (
+            explicit
+            if explicit
+            else _existing_fingertip_contact_command(output, finger, STANDARD_OPEN_COMMAND)
+        )
+
+    rclpy.init()
+    node = FingertipContactCapture(parsed.glove_topic, transform)
+    spin_thread = _spin_capture_node(node)
+    labels = [("natural_open", "自然张开，拇指远离四指")]
+    labels.extend(
+        (f"thumb_{finger}_tip_touch", f"拇指指尖触碰{_finger_chinese_name(finger)}指尖")
+        for finger in FINGER_NAMES
+    )
+    samples: dict[str, dict[str, list[float]]] = {}
+    try:
+        for label, prompt in labels:
+            input(f"Set pose '{label}' ({prompt}), hold still, then press Enter...")
+            print(f"Capturing '{label}' raw fingertip distances for {parsed.duration:.1f}s...")
+            samples[label] = node.capture(parsed.duration)
+            print(
+                yaml.safe_dump(
+                    {label: _contact_sample_summary(samples[label])},
+                    sort_keys=False,
+                    allow_unicode=True,
+                )
+            )
+
+        calibration = _build_fingertip_contact_calibration(
+            samples,
+            output,
+            min_hold_sec=parsed.min_hold_sec,
+            release_hold_sec=parsed.release_hold_sec,
+            candidate_gap_ratio=parsed.candidate_gap_ratio,
+            takeover_start_progress=parsed.takeover_start_progress,
+            activation_rise_sec=parsed.activation_rise_sec,
+            activation_release_sec=parsed.activation_release_sec,
+            robot_commands=robot_commands,
+            max_command_delta=parsed.max_command_delta,
+        )
+        output_path = _save_yaml(calibration, output)
+        print(f"Saved raw fingertip contact calibration to {output_path}")
+        print("The saved runtime.enabled remains false; confirm each L20 contact command before enabling it.")
+    finally:
+        _shutdown_capture_node(node, spin_thread)
+
+
+def _contact_sample_summary(samples: dict[str, list[float]]) -> dict[str, dict[str, float]]:
+    return {
+        finger: {
+            "median_ratio": round(_percentile(values, 0.50), 6),
+            "p95_ratio": round(_percentile(values, 0.95), 6),
+        }
+        for finger, values in samples.items()
+        if values
+    }
+
+
+def _finger_chinese_name(finger: str) -> str:
+    return {"index": "食", "middle": "中", "ring": "无名", "pinky": "小"}[finger]
+
+
+def _validate_fingertip_contact_args(parsed: argparse.Namespace) -> None:
+    nonnegative = (
+        "min_hold_sec",
+        "release_hold_sec",
+        "candidate_gap_ratio",
+        "activation_rise_sec",
+        "activation_release_sec",
+        "max_command_delta",
+    )
+    invalid = [
+        name
+        for name in nonnegative
+        if not math.isfinite(float(getattr(parsed, name))) or float(getattr(parsed, name)) < 0.0
+    ]
+    if invalid:
+        raise RuntimeError(f"fingertip contact arguments must be nonnegative: {', '.join(invalid)}")
+    if not math.isfinite(float(parsed.takeover_start_progress)) or not 0.0 <= parsed.takeover_start_progress < 1.0:
+        raise RuntimeError("takeover-start-progress must be in [0.0, 1.0)")
+
+
 def _config_output_path(hand: str, filename: str, override: str) -> str:
     if str(override).strip():
         return str(Path(override).expanduser())
@@ -776,6 +1019,36 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     thumb_frame.add_argument("--robot-touch-command", default="")
     thumb_frame.set_defaults(func=run_thumb_frame)
+
+    fingertip_contact = subparsers.add_parser(
+        "fingertip-contact",
+        description="Capture raw thumb-to-fingertip contact thresholds without sending L20 commands.",
+    )
+    _add_common_glove_args(fingertip_contact)
+    fingertip_contact.add_argument("--hand", choices=["right", "left"], default="right")
+    fingertip_contact.add_argument("--output", default="")
+    fingertip_contact.add_argument("--min-hold-sec", type=float, default=0.10)
+    fingertip_contact.add_argument("--release-hold-sec", type=float, default=0.05)
+    fingertip_contact.add_argument("--candidate-gap-ratio", type=float, default=0.02)
+    fingertip_contact.add_argument(
+        "--takeover-start-progress",
+        type=float,
+        default=0.35,
+        help="Gesture progress from natural-open to contact at which full-pose takeover begins.",
+    )
+    fingertip_contact.add_argument("--activation-rise-sec", type=float, default=0.10)
+    fingertip_contact.add_argument("--activation-release-sec", type=float, default=0.12)
+    fingertip_contact.add_argument("--max-command-delta", type=int, default=255)
+    for finger in FINGER_NAMES:
+        fingertip_contact.add_argument(
+            f"--{finger}-contact-command",
+            default="",
+            help=(
+                f"20-slot L20 command for thumb-{finger} contact. "
+                "When omitted, preserve the command already in the output YAML."
+            ),
+        )
+    fingertip_contact.set_defaults(func=run_fingertip_contact)
 
     all_calibration = subparsers.add_parser(
         "all",
