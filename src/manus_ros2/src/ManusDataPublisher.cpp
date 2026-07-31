@@ -26,6 +26,42 @@ std::string GloveTopicNameForSide(Side p_Side)
         return "manus_glove_invalid";
     }
 }
+
+bool RecoverStandardHandNodeMetadata(
+    uint32_t p_NodeId,
+    uint32_t& p_ParentNodeId,
+    std::string& p_ChainType,
+    std::string& p_JointType)
+{
+    switch (p_NodeId)
+    {
+    case 1: p_ParentNodeId = 0; p_ChainType = "Thumb"; p_JointType = "MCP"; return true;
+    case 2: p_ParentNodeId = 1; p_ChainType = "Thumb"; p_JointType = "PIP"; return true;
+    case 3: p_ParentNodeId = 2; p_ChainType = "Thumb"; p_JointType = "DIP"; return true;
+    case 4: p_ParentNodeId = 3; p_ChainType = "Thumb"; p_JointType = "TIP"; return true;
+    case 5: p_ParentNodeId = 0; p_ChainType = "Index"; p_JointType = "MCP"; return true;
+    case 6: p_ParentNodeId = 5; p_ChainType = "Index"; p_JointType = "PIP"; return true;
+    case 7: p_ParentNodeId = 6; p_ChainType = "Index"; p_JointType = "IP"; return true;
+    case 8: p_ParentNodeId = 7; p_ChainType = "Index"; p_JointType = "DIP"; return true;
+    case 9: p_ParentNodeId = 8; p_ChainType = "Index"; p_JointType = "TIP"; return true;
+    case 10: p_ParentNodeId = 0; p_ChainType = "Middle"; p_JointType = "MCP"; return true;
+    case 11: p_ParentNodeId = 10; p_ChainType = "Middle"; p_JointType = "PIP"; return true;
+    case 12: p_ParentNodeId = 11; p_ChainType = "Middle"; p_JointType = "IP"; return true;
+    case 13: p_ParentNodeId = 12; p_ChainType = "Middle"; p_JointType = "DIP"; return true;
+    case 14: p_ParentNodeId = 13; p_ChainType = "Middle"; p_JointType = "TIP"; return true;
+    case 15: p_ParentNodeId = 0; p_ChainType = "Ring"; p_JointType = "MCP"; return true;
+    case 16: p_ParentNodeId = 15; p_ChainType = "Ring"; p_JointType = "PIP"; return true;
+    case 17: p_ParentNodeId = 16; p_ChainType = "Ring"; p_JointType = "IP"; return true;
+    case 18: p_ParentNodeId = 17; p_ChainType = "Ring"; p_JointType = "DIP"; return true;
+    case 19: p_ParentNodeId = 18; p_ChainType = "Ring"; p_JointType = "TIP"; return true;
+    case 20: p_ParentNodeId = 0; p_ChainType = "Pinky"; p_JointType = "MCP"; return true;
+    case 21: p_ParentNodeId = 20; p_ChainType = "Pinky"; p_JointType = "PIP"; return true;
+    case 22: p_ParentNodeId = 21; p_ChainType = "Pinky"; p_JointType = "IP"; return true;
+    case 23: p_ParentNodeId = 22; p_ChainType = "Pinky"; p_JointType = "DIP"; return true;
+    case 24: p_ParentNodeId = 23; p_ChainType = "Pinky"; p_JointType = "TIP"; return true;
+    default: return false;
+    }
+}
 }
 
 ManusDataPublisher *ManusDataPublisher::s_Instance = nullptr;
@@ -327,21 +363,48 @@ void ManusDataPublisher::PublishCallback()
 
         for (const auto &node : t_RawSkel.nodes)
         {
-
-            uint32_t t_NodeInfoIndex = 0;
-            for (; t_NodeInfoIndex < t_RawSkel.info.nodesCount; t_NodeInfoIndex++)
+            const NodeInfo* t_NodeInfo = nullptr;
+            for (uint32_t t_NodeInfoIndex = 0; t_NodeInfoIndex < t_RawSkel.info.nodesCount; t_NodeInfoIndex++)
             {
                 if (m_NodeInfo[t_NodeInfoIndex].nodeId == node.id)
                 {
+                    t_NodeInfo = &m_NodeInfo[t_NodeInfoIndex];
                     break;
                 }
             }
 
             manus_ros2_msgs::msg::ManusRawNode t_Node;
             t_Node.node_id = node.id;
-            t_Node.parent_node_id = m_NodeInfo[t_NodeInfoIndex].parentId;
-            t_Node.joint_type = JointTypeToString(m_NodeInfo[t_NodeInfoIndex].fingerJointType);
-            t_Node.chain_type = ChainTypeToString(m_NodeInfo[t_NodeInfoIndex].chainType);
+            if (t_NodeInfo != nullptr)
+            {
+                t_Node.parent_node_id = t_NodeInfo->parentId;
+                t_Node.joint_type = JointTypeToString(t_NodeInfo->fingerJointType);
+                t_Node.chain_type = ChainTypeToString(t_NodeInfo->chainType);
+            }
+
+            if (t_NodeInfo == nullptr || t_Node.chain_type == "Invalid" || t_Node.joint_type == "Invalid")
+            {
+                uint32_t t_FallbackParentNodeId = 0;
+                std::string t_FallbackChainType;
+                std::string t_FallbackJointType;
+                if (RecoverStandardHandNodeMetadata(
+                        node.id,
+                        t_FallbackParentNodeId,
+                        t_FallbackChainType,
+                        t_FallbackJointType))
+                {
+                    t_Node.parent_node_id = t_FallbackParentNodeId;
+                    t_Node.chain_type = t_FallbackChainType;
+                    t_Node.joint_type = t_FallbackJointType;
+                    static bool s_NodeMetadataFallbackWarned = false;
+                    if (!s_NodeMetadataFallbackWarned)
+                    {
+                        ClientLog::print(
+                            "Raw skeleton NodeInfo metadata did not match node IDs; using the standard 25-node hand layout.");
+                        s_NodeMetadataFallbackWarned = true;
+                    }
+                }
+            }
 
             ManusVec3 t_Pos = node.transform.position;
             ManusQuaternion t_Rot = node.transform.rotation;

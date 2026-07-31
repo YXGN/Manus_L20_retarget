@@ -62,6 +62,10 @@ def _thumb_flexion_ergonomics_config_name(hand_type: str) -> str:
     return f"thumb_{hand_type}_flexion_ergonomics_mapping.yaml"
 
 
+def _fingertip_contact_semantics_default(hand_type: str) -> str:
+    return _config_file(f"fingertip_contact_semantics_{hand_type}.yaml")
+
+
 def _manus_calibration_file(hand_type: str) -> str:
     return str(_SRC / "manus_ros2" / "calibration" / f"Calibration_{hand_type}.mcal")
 
@@ -94,6 +98,9 @@ def _hand_actions(
     thumb_flexion_root_gamma,
     thumb_flexion_tip_gamma,
     thumb_ik_debug,
+    enable_fingertip_contact_semantics,
+    fingertip_contact_semantics_path,
+    fingertip_contact_debug,
     thumb_segment_start,
     thumb_segment_end,
     thumb_segment_frame_path,
@@ -153,6 +160,9 @@ def _hand_actions(
                     "thumb_flexion_root_gamma": thumb_flexion_root_gamma,
                     "thumb_flexion_tip_gamma": thumb_flexion_tip_gamma,
                     "thumb_ik_debug": thumb_ik_debug,
+                    "enable_fingertip_contact_semantics": enable_fingertip_contact_semantics,
+                    "fingertip_contact_semantics_path": fingertip_contact_semantics_path,
+                    "fingertip_contact_debug": fingertip_contact_debug,
                     "thumb_segment_start": thumb_segment_start,
                     "thumb_segment_end": thumb_segment_end,
                     "thumb_segment_frame_path": thumb_segment_frame_path,
@@ -256,7 +266,7 @@ def generate_manus_l20_launch(
             DeclareLaunchArgument("can", default_value="can0"),
             DeclareLaunchArgument("is_touch", default_value="false"),
             DeclareLaunchArgument("input_topic", default_value="/manus_glove_0"),
-            DeclareLaunchArgument("driver_speed", default_value="50,50,50,50,50"),
+            DeclareLaunchArgument("driver_speed", default_value="80,80,80,80,80"),
             DeclareLaunchArgument("driver_command_hz", default_value="200.0"),
             DeclareLaunchArgument("driver_state_hz", default_value="10.0"),
             DeclareLaunchArgument("driver_can_sleep_ms", default_value="3.0"),
@@ -293,6 +303,12 @@ def generate_manus_l20_launch(
             DeclareLaunchArgument("thumb_flexion_root_gamma", default_value="1.0"),
             DeclareLaunchArgument("thumb_flexion_tip_gamma", default_value="1.0"),
             DeclareLaunchArgument("thumb_ik_debug", default_value="false"),
+            DeclareLaunchArgument("enable_fingertip_contact_semantics", default_value="false"),
+            DeclareLaunchArgument(
+                "fingertip_contact_semantics_path",
+                default_value=_fingertip_contact_semantics_default(logic_type),
+            ),
+            DeclareLaunchArgument("fingertip_contact_debug", default_value="false"),
             DeclareLaunchArgument("thumb_segment_start", default_value="2"),
             DeclareLaunchArgument("thumb_segment_end", default_value="3"),
             DeclareLaunchArgument("thumb_segment_frame_path", default_value=_thumb_segment_frame_default(logic_type)),
@@ -357,6 +373,9 @@ def generate_manus_l20_launch(
                 thumb_flexion_root_gamma=LaunchConfiguration("thumb_flexion_root_gamma"),
                 thumb_flexion_tip_gamma=LaunchConfiguration("thumb_flexion_tip_gamma"),
                 thumb_ik_debug=LaunchConfiguration("thumb_ik_debug"),
+                enable_fingertip_contact_semantics=LaunchConfiguration("enable_fingertip_contact_semantics"),
+                fingertip_contact_semantics_path=LaunchConfiguration("fingertip_contact_semantics_path"),
+                fingertip_contact_debug=LaunchConfiguration("fingertip_contact_debug"),
                 thumb_segment_start=LaunchConfiguration("thumb_segment_start"),
                 thumb_segment_end=LaunchConfiguration("thumb_segment_end"),
                 thumb_segment_frame_path=LaunchConfiguration("thumb_segment_frame_path"),
@@ -410,7 +429,7 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         DeclareLaunchArgument("is_touch", default_value="false"),
         DeclareLaunchArgument("right_input_topic", default_value="/manus_glove_0"),
         DeclareLaunchArgument("left_input_topic", default_value="/manus_glove_1"),
-        DeclareLaunchArgument("driver_speed", default_value="50,50,50,50,50"),
+        DeclareLaunchArgument("driver_speed", default_value="80,80,80,80,80"),
         DeclareLaunchArgument("driver_command_hz", default_value="200.0"),
         DeclareLaunchArgument("driver_state_hz", default_value="10.0"),
         DeclareLaunchArgument("driver_can_sleep_ms", default_value="3.0"),
@@ -454,9 +473,19 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
             "left_thumb_flexion_ergonomics_mapping_path",
             default_value=_config_file(_thumb_flexion_ergonomics_config_name("left")),
         ),
+        DeclareLaunchArgument(
+            "right_fingertip_contact_semantics_path",
+            default_value=_fingertip_contact_semantics_default("right"),
+        ),
+        DeclareLaunchArgument(
+            "left_fingertip_contact_semantics_path",
+            default_value=_fingertip_contact_semantics_default("left"),
+        ),
         DeclareLaunchArgument("thumb_flexion_root_gamma", default_value="1.0"),
         DeclareLaunchArgument("thumb_flexion_tip_gamma", default_value="1.0"),
         DeclareLaunchArgument("thumb_ik_debug", default_value="false"),
+        DeclareLaunchArgument("enable_fingertip_contact_semantics", default_value="false"),
+        DeclareLaunchArgument("fingertip_contact_debug", default_value="false"),
         DeclareLaunchArgument("thumb_segment_start", default_value="2"),
         DeclareLaunchArgument("thumb_segment_end", default_value="3"),
         DeclareLaunchArgument("thumb_segment_scale", default_value="1.0"),
@@ -498,6 +527,7 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         finger_flexion_ergonomics_calibration_path_name: str,
         finger_yaw_calibration_path_name: str,
         thumb_flexion_ergonomics_mapping_path_name: str,
+        fingertip_contact_semantics_path_name: str,
         haptic_glove_id_name: str,
         haptic_force_topic_name: str,
         haptic_vib_topic_name: str,
@@ -530,6 +560,9 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
             thumb_flexion_root_gamma=LaunchConfiguration("thumb_flexion_root_gamma"),
             thumb_flexion_tip_gamma=LaunchConfiguration("thumb_flexion_tip_gamma"),
             thumb_ik_debug=LaunchConfiguration("thumb_ik_debug"),
+            enable_fingertip_contact_semantics=LaunchConfiguration("enable_fingertip_contact_semantics"),
+            fingertip_contact_semantics_path=LaunchConfiguration(fingertip_contact_semantics_path_name),
+            fingertip_contact_debug=LaunchConfiguration("fingertip_contact_debug"),
             thumb_segment_start=LaunchConfiguration("thumb_segment_start"),
             thumb_segment_end=LaunchConfiguration("thumb_segment_end"),
             thumb_segment_frame_path=_thumb_segment_frame_default(hand_type),
@@ -576,6 +609,7 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
                 "right_finger_flexion_ergonomics_calibration_path",
                 "right_finger_yaw_calibration_path",
                 "right_thumb_flexion_ergonomics_mapping_path",
+                "right_fingertip_contact_semantics_path",
                 "right_haptic_glove_id",
                 "right_haptic_force_topic",
                 "right_haptic_vib_topic",
@@ -592,6 +626,7 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
                 "left_finger_flexion_ergonomics_calibration_path",
                 "left_finger_yaw_calibration_path",
                 "left_thumb_flexion_ergonomics_mapping_path",
+                "left_fingertip_contact_semantics_path",
                 "left_haptic_glove_id",
                 "left_haptic_force_topic",
                 "left_haptic_vib_topic",

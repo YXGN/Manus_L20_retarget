@@ -19,4 +19,15 @@ thumb_<hand>_flexion_ergonomics_mapping.yaml
 thumb_segment_frame_<hand>.yaml
 ```
 
+Optional contact-semantic calibration files are separate because raw fingertip
+distance thresholds and robot contact targets have a different physical meaning
+from flexion, yaw, and thumb segment-frame calibration:
+
+```text
+fingertip_contact_semantics_<hand>.yaml
+```
+
+They are loaded only when `enable_fingertip_contact_semantics:=true` and the
+YAML `runtime.enabled` is also `true`. The default launch path leaves them off.
+
 `manus_l20_retarget_node.py` combines these into one 20-slot L20 `JointState` command. `retarget_pipeline.py` contains the pure ergonomics mapping and command filtering math. `manus_landmarks.py` exposes named MANUS finger joints and retains the 21-point adapter only because the current thumb segment IK consumes it.

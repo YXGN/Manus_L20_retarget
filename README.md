@@ -13,6 +13,7 @@ MANUS glove -> manus_l20_retarget -> /cb_<hand>_hand_control_cmd
 - Four-finger yaw: calibrated MANUS ergonomics spread values.
 - Thumb root/tip: calibrated MANUS ergonomics flexion.
 - Thumb roll/yaw: mandatory two-pose segment IK frame.
+- Optional fingertip contact semantics: calibrated raw-skeleton thumb-to-fingertip distance selects one contact pair and continuously blends only the thumb and selected finger's calibrated Root/Tip plus thumb Roll/Yaw. Other fingers remain on normal teleoperation. It is disabled by default.
 
 Revo retargeting, geometric flexion calibration, raw/orientation yaw calibration, full-hand IK, direct thumb roll/yaw, and startup open-vector alignment are removed from the active path.
 

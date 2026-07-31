@@ -12,10 +12,10 @@ ergonomics_keys:
 - RingSpread
 - PinkySpread
 ergonomics_source_ranges:
-  IndexSpread: 18.666319
-  MiddleSpread: 3.495783
-  RingSpread: 7.188966
-  PinkySpread: 21.123334
+  IndexSpread: 16.849611
+  MiddleSpread: 1.702096
+  RingSpread: 8.362587
+  PinkySpread: 30.143447
 command:
   natural_open_command:
   - 255    # 0  Thumb Base / 拇指根部弯曲
@@ -83,82 +83,82 @@ command:
 samples:
   natural_open:
     yaw_rad:
-    - 8.251073
-    - 0.353408
-    - -8.240864
-    - -14.971078
+    - 3.558411
+    - -6.315207
+    - -14.997988
+    - -29.920481
     ergonomics:
-      IndexDIPStretch: 1.669606
-      IndexMCPStretch: -2.641334
-      IndexPIPStretch: -0.030351
-      IndexSpread: 8.251073
-      MiddleDIPStretch: -8.194345
-      MiddleMCPStretch: 2.696001
-      MiddlePIPStretch: -0.05644
-      MiddleSpread: 0.353408
-      PinkyDIPStretch: -17.107137
-      PinkyMCPStretch: 0.903958
-      PinkyPIPStretch: -0.376811
-      PinkySpread: -14.971078
-      RingDIPStretch: -2.059565
-      RingMCPStretch: -3.255359
-      RingPIPStretch: 0.014862
-      RingSpread: -8.240864
-      ThumbDIPStretch: -20.264645
-      ThumbMCPSpread: 8.659662
-      ThumbMCPStretch: 44.876613
-      ThumbPIPStretch: -0.147266
+      IndexDIPStretch: -17.318703
+      IndexMCPStretch: 0.569455
+      IndexPIPStretch: -0.22211
+      IndexSpread: 3.558411
+      MiddleDIPStretch: -11.581787
+      MiddleMCPStretch: 2.238799
+      MiddlePIPStretch: -0.179128
+      MiddleSpread: -6.315207
+      PinkyDIPStretch: -10.310357
+      PinkyMCPStretch: 7.736579
+      PinkyPIPStretch: -0.087277
+      PinkySpread: -29.920481
+      RingDIPStretch: -15.35652
+      RingMCPStretch: -2.430319
+      RingPIPStretch: -0.258127
+      RingSpread: -14.997988
+      ThumbDIPStretch: -19.114236
+      ThumbMCPSpread: 5.726126
+      ThumbMCPStretch: 45.742582
+      ThumbPIPStretch: 0.300564
   finger_close:
     yaw_rad:
-    - -10.415246
-    - -3.142375
-    - -1.051898
-    - 6.152256
+    - -13.2912
+    - -7.345175
+    - -6.635401
+    - 0.222966
     ergonomics:
-      IndexDIPStretch: -9.034381
-      IndexMCPStretch: 7.626699
-      IndexPIPStretch: -0.077823
-      IndexSpread: -10.415246
-      MiddleDIPStretch: -15.245072
-      MiddleMCPStretch: 8.13515
-      MiddlePIPStretch: 0.175307
-      MiddleSpread: -3.142375
-      PinkyDIPStretch: -18.811308
-      PinkyMCPStretch: 12.103699
-      PinkyPIPStretch: -0.46161
-      PinkySpread: 6.152256
-      RingDIPStretch: -20.997744
-      RingMCPStretch: 4.504421
-      RingPIPStretch: 7.674173
-      RingSpread: -1.051898
-      ThumbDIPStretch: -19.210092
-      ThumbMCPSpread: 9.112393
-      ThumbMCPStretch: 42.524409
-      ThumbPIPStretch: -0.028893
+      IndexDIPStretch: -30.720991
+      IndexMCPStretch: 1.764532
+      IndexPIPStretch: -0.344864
+      IndexSpread: -13.2912
+      MiddleDIPStretch: -26.867993
+      MiddleMCPStretch: 2.41209
+      MiddlePIPStretch: -0.05458
+      MiddleSpread: -7.345175
+      PinkyDIPStretch: -12.730594
+      PinkyMCPStretch: 11.561134
+      PinkyPIPStretch: -0.030777
+      PinkySpread: 0.222966
+      RingDIPStretch: -27.643554
+      RingMCPStretch: 3.750656
+      RingPIPStretch: 0.167091
+      RingSpread: -6.635401
+      ThumbDIPStretch: -18.744071
+      ThumbMCPSpread: -0.133054
+      ThumbMCPStretch: 46.908131
+      ThumbPIPStretch: 12.555833
   finger_spread:
     yaw_rad:
-    - 8.549534
-    - 0.618839
-    - -9.975604
-    - -27.143293
+    - 4.126783
+    - -8.017303
+    - -18.717841
+    - -45.18858
     ergonomics:
-      IndexDIPStretch: -3.003025
-      IndexMCPStretch: -2.957596
-      IndexPIPStretch: 0.004008
-      IndexSpread: 8.549534
-      MiddleDIPStretch: -10.248572
-      MiddleMCPStretch: -5.836488
-      MiddlePIPStretch: -0.009978
-      MiddleSpread: 0.618839
-      PinkyDIPStretch: -23.313991
-      PinkyMCPStretch: 11.586696
-      PinkyPIPStretch: -0.433571
-      PinkySpread: -27.143293
-      RingDIPStretch: -7.528691
-      RingMCPStretch: -2.450083
-      RingPIPStretch: 0.019619
-      RingSpread: -9.975604
-      ThumbDIPStretch: -22.126066
-      ThumbMCPSpread: 10.407573
-      ThumbMCPStretch: 44.360203
-      ThumbPIPStretch: -0.230955
+      IndexDIPStretch: -21.995576
+      IndexMCPStretch: -10.175827
+      IndexPIPStretch: -0.073602
+      IndexSpread: 4.126783
+      MiddleDIPStretch: -22.632086
+      MiddleMCPStretch: -12.022413
+      MiddlePIPStretch: -0.060621
+      MiddleSpread: -8.017303
+      PinkyDIPStretch: -24.645414
+      PinkyMCPStretch: 12.174999
+      PinkyPIPStretch: 0.629447
+      PinkySpread: -45.18858
+      RingDIPStretch: -21.236212
+      RingMCPStretch: -10.645997
+      RingPIPStretch: -0.046877
+      RingSpread: -18.717841
+      ThumbDIPStretch: -25.630974
+      ThumbMCPSpread: 6.643996
+      ThumbMCPStretch: 45.956474
+      ThumbPIPStretch: -0.13908
