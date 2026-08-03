@@ -7,6 +7,8 @@ import numpy as np
 
 from manus_l20_retarget.contact_semantics import (
     FINGERTIP_CONTACT_SLOTS,
+    FingertipContactCommandBlender,
+    FingertipContactPhaseConfig,
     FingertipContactStateMachine,
     blend_fingertip_contact_command,
     parse_fingertip_contact_config,
@@ -36,6 +38,9 @@ def _config_data() -> dict:
             "release_hold_sec": 0.05,
             "candidate_gap_ratio": 0.02,
             "takeover_start_progress": 0.50,
+            "full_takeover_progress": 1.00,
+            "firm_contact_enter_activation": 1.00,
+            "firm_contact_release_activation": 1.00,
             "activation_rise_sec": 0.10,
             "activation_release_sec": 0.10,
         },
@@ -156,6 +161,34 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         self.assertEqual(blended[5], 100)
         self.assertEqual(blended[10], 100)
 
+    def test_command_blender_applies_close_and_release_phase_ordering(self) -> None:
+        data = _config_data()
+        for contact in data["contacts"].values():
+            contact["robot"]["max_command_delta"] = 255
+        profile = parse_fingertip_contact_config(data).profiles["index"]
+        blender = FingertipContactCommandBlender(
+            FingertipContactPhaseConfig(
+                close_orientation_completion=0.25,
+                close_flexion_start=0.40,
+                release_flexion_open_completion=0.18,
+                release_orientation_gamma=2.5,
+            ),
+            lambda slot: 255,
+        )
+
+        closing = blender.blend([100] * 20, profile, 0.25)
+        self.assertEqual(closing[5], 10)
+        self.assertEqual(closing[10], 10)
+        for slot in (0, 1, 15, 16):
+            self.assertEqual(closing[slot], 100)
+
+        blender.blend([100] * 20, profile, 1.0)
+        releasing = blender.blend([100] * 20, profile, 0.82)
+        for slot in (0, 1, 15, 16):
+            self.assertEqual(releasing[slot], 255)
+        self.assertLess(releasing[5], 20)
+        self.assertLess(releasing[10], 20)
+
     def test_distance_controls_full_pose_takeover(self) -> None:
         data = _config_data()
         data["runtime"].update(
@@ -176,7 +209,35 @@ class FingertipContactSemanticsTest(unittest.TestCase):
 
         full = state.update({**ratios, "index": 0.10}, 0.02)
         self.assertEqual(full.pair, "index")
+        self.assertAlmostEqual(full.activation, 1.0)
+
+    def test_full_takeover_can_saturate_before_exact_touch_and_hold_firmly(self) -> None:
+        data = _config_data()
+        data["runtime"].update(
+            {
+                "min_hold_sec": 0.0,
+                "takeover_start_progress": 0.50,
+                "full_takeover_progress": 0.75,
+                "firm_contact_enter_activation": 0.90,
+                "firm_contact_release_activation": 0.35,
+                "activation_rise_sec": 0.0,
+                "activation_release_sec": 0.0,
+            }
+        )
+        config = parse_fingertip_contact_config(data)
+        state = FingertipContactStateMachine(config)
+        ratios = {"index": 0.24, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
+
+        state.update(ratios, 0.00)
+        full = state.update(ratios, 0.01)
+        self.assertEqual(full.pair, "index")
         self.assertEqual(full.activation, 1.0)
+
+        still_held = state.update({**ratios, "index": 0.30}, 0.02)
+        self.assertEqual(still_held.activation, 1.0)
+
+        released_from_firm_hold = state.update({**ratios, "index": 0.36}, 0.03)
+        self.assertLess(released_from_firm_hold.activation, 1.0)
 
     def test_full_takeover_reaches_contact_command_for_dynamic_slots(self) -> None:
         data = _config_data()

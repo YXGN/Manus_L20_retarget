@@ -10,6 +10,9 @@ runtime:
   release_hold_sec: 0.05
   candidate_gap_ratio: 0.02
   takeover_start_progress: 0.35
+  full_takeover_progress: 0.75
+  firm_contact_enter_activation: 0.9
+  firm_contact_release_activation: 0.35
   activation_rise_sec: 0.1
   activation_release_sec: 0.12
 contacts:

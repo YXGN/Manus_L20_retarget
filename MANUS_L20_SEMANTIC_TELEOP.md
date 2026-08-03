@@ -55,7 +55,40 @@ MANUS ergonomics 四指/拇指弯曲
 
 这个提前量是相对于当前语义动作的，例如识别到食指对指时，slot 5/10 只提前走食指对指 YAML 里的 Roll/Yaw；不会提前转到小拇指对指姿态。
 
-## 2. 启动 MANUS 数据发布器
+## 2. 代码结构
+
+语义对指相关逻辑集中在 `contact_semantics.py`：
+
+```text
+thumb_fingertip_distance_ratios()
+  从 raw skeleton 计算 Thumb.TIP 到四指 TIP 的掌宽归一化距离。
+
+FingertipContactStateMachine
+  根据距离比例选择 index/middle/ring/pinky 的当前对指 pair，并输出 activation。
+  activation 带坚定接触保持，避免 raw skeleton 小抖动造成反复张开/闭合。
+
+FingertipContactCommandBlender
+  根据 activation 的增减方向做分相位接管：
+  - 闭合时 slot 5/10 先走。
+  - 松开时 root/tip 先回 open。
+
+blend_fingertip_contact_command()
+  只混合当前 pair 的 override_slots，不改其他手指。
+```
+
+`manus_l20_retarget_node.py` 只负责调度：
+
+```text
+基础遥操命令
+-> thumb_fingertip_distance_ratios()
+-> FingertipContactStateMachine.update()
+-> FingertipContactCommandBlender.blend()
+-> 发布 L20 20-slot
+```
+
+这样主节点保持一条主链路，语义模块自己负责“识别 + 状态机 + 接管权重”。
+
+## 3. 启动 MANUS 数据发布器
 
 新开一个终端，只启动 MANUS，不启动 L20 真机：
 
@@ -79,7 +112,7 @@ ros2 topic hz /manus_glove_1
 
 如果只有一只手套，可能只有 `/manus_glove_0`。
 
-## 3. 对指标定命令
+## 4. 对指标定命令
 
 右手：
 
@@ -124,7 +157,7 @@ src/manus_l20_retarget/config/fingertip_contact_semantics_right.yaml
 src/manus_l20_retarget/config/fingertip_contact_semantics_left.yaml
 ```
 
-## 4. YAML 检查和人工参数
+## 5. YAML 检查和人工参数
 
 每个 YAML 里有两类信息：
 
@@ -165,7 +198,7 @@ runtime:
 
 注意必须是 `true`，不是 `ture`。本语义调试分支里 YAML 和 launch 默认都已打开；如果 YAML 写错，launch 参数打开了也不会生效。
 
-## 5. 双手语义遥操作启动命令
+## 6. 双手语义遥操作启动命令
 
 真机测试由用户手动执行。确认 CAN 已配置好后运行：
 
@@ -207,6 +240,20 @@ fingertip_contact_release_orientation_gamma:=2.5
 - `release_flexion_open_completion`: 从夹住到松开的前多少释放行程内，root/tip 完成回 open。数值越小，弯曲越快松开。
 - `release_orientation_gamma`: 松开时 Roll/Yaw 的回退曲线。数值越大，前段越慢、后段越快。
 
+YAML `runtime` 里还有三个用于“夹住更坚定”的参数：
+
+```text
+full_takeover_progress: 0.75
+firm_contact_enter_activation: 0.9
+firm_contact_release_activation: 0.35
+```
+
+含义：
+
+- `full_takeover_progress`: 从自然张开到接触标定值的 75% 行程时，语义接管就饱和到 1.0，不要求人手必须精确压到标定接触距离。
+- `firm_contact_enter_activation`: activation 达到 0.9 后，认为已经进入坚定接触。
+- `firm_contact_release_activation`: 进入坚定接触后，只有松到 0.35 以下才退出坚定接触，避免指尖距离小抖动导致 L20 反复张开闭合。
+
 如果后续要临时覆盖默认值，也可以在启动命令后加新的数值，例如：
 
 ```bash
@@ -222,7 +269,7 @@ fingertip_contact_release_orientation_gamma:=2.5
 driver_speed:=80,80,80,80,80
 ```
 
-## 6. 调试观察
+## 7. 调试观察
 
 打开 `fingertip_contact_debug:=true` 后，日志会显示语义接触事件：
 

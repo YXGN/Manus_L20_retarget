@@ -476,10 +476,14 @@ def _build_fingertip_contact_calibration(
     release_hold_sec: float,
     candidate_gap_ratio: float,
     takeover_start_progress: float,
+    full_takeover_progress: float,
+    firm_contact_enter_activation: float,
+    firm_contact_release_activation: float,
     activation_rise_sec: float,
     activation_release_sec: float,
     robot_commands: dict[str, list[int]],
     max_command_delta: int,
+    enabled: bool,
 ) -> dict[str, Any]:
     open_samples = samples["natural_open"]
     contacts: dict[str, Any] = {}
@@ -516,11 +520,14 @@ def _build_fingertip_contact_calibration(
             "unit": "palm_width_ratio",
         },
         "runtime": {
-            "enabled": False,
+            "enabled": bool(enabled),
             "min_hold_sec": round(float(min_hold_sec), 4),
             "release_hold_sec": round(float(release_hold_sec), 4),
             "candidate_gap_ratio": round(float(candidate_gap_ratio), 6),
             "takeover_start_progress": round(float(takeover_start_progress), 4),
+            "full_takeover_progress": round(float(full_takeover_progress), 4),
+            "firm_contact_enter_activation": round(float(firm_contact_enter_activation), 4),
+            "firm_contact_release_activation": round(float(firm_contact_release_activation), 4),
             "activation_rise_sec": round(float(activation_rise_sec), 4),
             "activation_release_sec": round(float(activation_release_sec), 4),
         },
@@ -554,6 +561,32 @@ def _existing_fingertip_contact_command(path: str, finger: str, fallback: list[i
     if not isinstance(robot, dict):
         return list(fallback)
     return _command_parameter(robot.get("contact_command"), fallback)
+
+
+def _existing_fingertip_contact_enabled(path: str, fallback: bool) -> bool:
+    try:
+        with Path(path).expanduser().open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    except (OSError, yaml.YAMLError):
+        return bool(fallback)
+    runtime = data.get("runtime") if isinstance(data, dict) else None
+    if not isinstance(runtime, dict):
+        return bool(fallback)
+    return _bool_parameter(runtime.get("enabled", fallback), fallback)
+
+
+def _bool_parameter(value: Any, fallback: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "on"}:
+            return True
+        if text in {"false", "0", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return bool(fallback)
 
 
 def _spin_capture_node(node: Node) -> threading.Thread:
@@ -759,6 +792,7 @@ def run_fingertip_contact(parsed: argparse.Namespace) -> None:
     if hand == "left" and transform == "right_glove_to_right_retarget":
         transform = "left_glove_to_right_retarget"
     output = _config_output_path(hand, "fingertip_contact_semantics_{hand}.yaml", parsed.output)
+    enabled = _existing_fingertip_contact_enabled(output, True)
     robot_commands: dict[str, list[int]] = {}
     for finger in FINGER_NAMES:
         explicit = _command_parameter(getattr(parsed, f"{finger}_contact_command"), [])
@@ -797,14 +831,18 @@ def run_fingertip_contact(parsed: argparse.Namespace) -> None:
             release_hold_sec=parsed.release_hold_sec,
             candidate_gap_ratio=parsed.candidate_gap_ratio,
             takeover_start_progress=parsed.takeover_start_progress,
+            full_takeover_progress=parsed.full_takeover_progress,
+            firm_contact_enter_activation=parsed.firm_contact_enter_activation,
+            firm_contact_release_activation=parsed.firm_contact_release_activation,
             activation_rise_sec=parsed.activation_rise_sec,
             activation_release_sec=parsed.activation_release_sec,
             robot_commands=robot_commands,
             max_command_delta=parsed.max_command_delta,
+            enabled=enabled,
         )
         output_path = _save_yaml(calibration, output)
         print(f"Saved raw fingertip contact calibration to {output_path}")
-        print("The saved runtime.enabled remains false; confirm each L20 contact command before enabling it.")
+        print(f"The saved runtime.enabled is {str(enabled).lower()}; existing setting is preserved.")
     finally:
         _shutdown_capture_node(node, spin_thread)
 
@@ -1036,6 +1074,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0.35,
         help="Gesture progress from natural-open to contact at which full-pose takeover begins.",
     )
+    fingertip_contact.add_argument(
+        "--full-takeover-progress",
+        type=float,
+        default=0.75,
+        help="Gesture progress from natural-open to contact at which semantic contact saturates.",
+    )
+    fingertip_contact.add_argument("--firm-contact-enter-activation", type=float, default=0.90)
+    fingertip_contact.add_argument("--firm-contact-release-activation", type=float, default=0.35)
     fingertip_contact.add_argument("--activation-rise-sec", type=float, default=0.10)
     fingertip_contact.add_argument("--activation-release-sec", type=float, default=0.12)
     fingertip_contact.add_argument("--max-command-delta", type=int, default=255)
