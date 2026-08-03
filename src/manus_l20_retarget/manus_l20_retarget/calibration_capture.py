@@ -478,7 +478,7 @@ def _build_fingertip_contact_calibration(
     takeover_start_progress: float,
     full_takeover_progress: float,
     firm_contact_enter_activation: float,
-    firm_contact_release_activation: float,
+    release_start_progress_delta: float,
     activation_rise_sec: float,
     activation_release_sec: float,
     robot_commands: dict[str, list[int]],
@@ -527,7 +527,7 @@ def _build_fingertip_contact_calibration(
             "takeover_start_progress": round(float(takeover_start_progress), 4),
             "full_takeover_progress": round(float(full_takeover_progress), 4),
             "firm_contact_enter_activation": round(float(firm_contact_enter_activation), 4),
-            "firm_contact_release_activation": round(float(firm_contact_release_activation), 4),
+            "release_start_progress_delta": round(float(release_start_progress_delta), 4),
             "activation_rise_sec": round(float(activation_rise_sec), 4),
             "activation_release_sec": round(float(activation_release_sec), 4),
         },
@@ -833,7 +833,7 @@ def run_fingertip_contact(parsed: argparse.Namespace) -> None:
             takeover_start_progress=parsed.takeover_start_progress,
             full_takeover_progress=parsed.full_takeover_progress,
             firm_contact_enter_activation=parsed.firm_contact_enter_activation,
-            firm_contact_release_activation=parsed.firm_contact_release_activation,
+            release_start_progress_delta=parsed.release_start_progress_delta,
             activation_rise_sec=parsed.activation_rise_sec,
             activation_release_sec=parsed.activation_release_sec,
             robot_commands=robot_commands,
@@ -880,6 +880,8 @@ def _validate_fingertip_contact_args(parsed: argparse.Namespace) -> None:
         raise RuntimeError(f"fingertip contact arguments must be nonnegative: {', '.join(invalid)}")
     if not math.isfinite(float(parsed.takeover_start_progress)) or not 0.0 <= parsed.takeover_start_progress < 1.0:
         raise RuntimeError("takeover-start-progress must be in [0.0, 1.0)")
+    if not math.isfinite(float(parsed.release_start_progress_delta)) or not 0.0 <= parsed.release_start_progress_delta <= 1.0:
+        raise RuntimeError("release-start-progress-delta must be in [0.0, 1.0]")
 
 
 def _config_output_path(hand: str, filename: str, override: str) -> str:
@@ -1081,7 +1083,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Gesture progress from natural-open to contact at which semantic contact saturates.",
     )
     fingertip_contact.add_argument("--firm-contact-enter-activation", type=float, default=0.90)
-    fingertip_contact.add_argument("--firm-contact-release-activation", type=float, default=0.35)
+    fingertip_contact.add_argument("--release-start-progress-delta", type=float, default=0.06)
     fingertip_contact.add_argument("--activation-rise-sec", type=float, default=0.10)
     fingertip_contact.add_argument("--activation-release-sec", type=float, default=0.12)
     fingertip_contact.add_argument("--max-command-delta", type=int, default=255)

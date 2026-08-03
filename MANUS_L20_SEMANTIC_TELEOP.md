@@ -2,6 +2,16 @@
 
 本文档只记录语义对指版本的标定和启动流程。普通四指弯曲、四指 yaw、拇指弯曲、拇指 Roll/Yaw IK 的基础标定仍参考 `MANUS_L20_TELEOP_SOP.md`。
 
+开始语义对指标定前，先用新的 MANUS 标定 GUI 更新手套 `.mcal`：
+
+```bash
+source /opt/ros/humble/setup.bash
+cd /home/huangzizhe/Download/Manus_L20_retarget
+./deploy/manus-calibration/run.sh
+```
+
+这一步只更新 `src/manus_ros2/calibration/Calibration_left.mcal` 和 `Calibration_right.mcal`。下面的对指标定仍然使用 ROS 命令生成 L20 语义 YAML。
+
 ## 1. 功能范围
 
 语义对指识别四类人手动作：
@@ -229,7 +239,7 @@ driver_speed:=80,80,80,80,80
 ```text
 fingertip_contact_close_orientation_completion:=0.25
 fingertip_contact_close_flexion_start:=0.40
-fingertip_contact_release_flexion_open_completion:=0.18
+fingertip_contact_release_flexion_open_completion:=0.65
 fingertip_contact_release_orientation_gamma:=2.5
 ```
 
@@ -237,29 +247,31 @@ fingertip_contact_release_orientation_gamma:=2.5
 
 - `close_orientation_completion`: 从张开到夹住的前多少接近行程内，Roll/Yaw 就完成接管。数值越小，Roll/Yaw 越早到位。
 - `close_flexion_start`: 接近行程超过多少以后，root/tip 才开始按语义夹住。数值越大，越晚闭合。
-- `release_flexion_open_completion`: 从夹住到松开的前多少释放行程内，root/tip 完成回 open。数值越小，弯曲越快松开。
+- `release_flexion_open_completion`: 从夹住到松开的前多少释放行程内，root/tip 完成回 open。数值越小，弯曲越快松开；当前默认 `0.65`，是“先打开弯曲，但不是硬弹开”的缓释手感。
 - `release_orientation_gamma`: 松开时 Roll/Yaw 的回退曲线。数值越大，前段越慢、后段越快。
 
-YAML `runtime` 里还有三个用于“夹住更坚定”的参数：
+YAML `runtime` 里还有两个用于“夹住更坚定”的参数：
 
 ```text
 full_takeover_progress: 0.75
 firm_contact_enter_activation: 0.9
-firm_contact_release_activation: 0.35
+release_start_progress_delta: 0.06
 ```
 
 含义：
 
 - `full_takeover_progress`: 从自然张开到接触标定值的 75% 行程时，语义接管就饱和到 1.0，不要求人手必须精确压到标定接触距离。
 - `firm_contact_enter_activation`: activation 达到 0.9 后，认为已经进入坚定接触。
-- `firm_contact_release_activation`: 进入坚定接触后，只有松到 0.35 以下才退出坚定接触，避免指尖距离小抖动导致 L20 反复张开闭合。
+- `release_start_progress_delta`: 进入坚定接触后，指尖距离需要比最近接触距离增大多少标定行程，才认为你真的在松开。默认 `0.06` 用来过滤慢闭合时的 raw skeleton 小抖动，不会把方向写死。
+
+进入坚定接触后，松开不再等待某个固定 release activation 阈值；当 `Thumb.TIP -> Finger.TIP` 距离出现明确打开趋势后，程序进入 release mode，并用当前距离在“接触标定距离”和“自然张开距离”之间连续插值。这样人手一打开，L20 的语义接管量就开始下降，但慢速闭合中的单帧噪声不会误触发打开。
 
 如果后续要临时覆盖默认值，也可以在启动命令后加新的数值，例如：
 
 ```bash
 fingertip_contact_close_orientation_completion:=0.25 \
 fingertip_contact_close_flexion_start:=0.40 \
-fingertip_contact_release_flexion_open_completion:=0.18 \
+fingertip_contact_release_flexion_open_completion:=0.65 \
 fingertip_contact_release_orientation_gamma:=2.5
 ```
 

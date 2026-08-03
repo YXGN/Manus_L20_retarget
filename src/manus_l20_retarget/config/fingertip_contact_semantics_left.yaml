@@ -12,7 +12,7 @@ runtime:
   takeover_start_progress: 0.35
   full_takeover_progress: 0.75
   firm_contact_enter_activation: 0.9
-  firm_contact_release_activation: 0.35
+  release_start_progress_delta: 0.06
   activation_rise_sec: 0.1
   activation_release_sec: 0.12
 contacts:
@@ -37,7 +37,7 @@ contacts:
       - 78 # 3  Ring Finger Base / 无名指根部弯曲
       - 78 # 4  Pinky Finger Base / 小指根部弯曲
       - 160 # 5  Thumb Roll / 拇指 roll
-      - 142 # 6  Index Finger Yaw / 食指侧摆
+      - 163 # 6  Index Finger Yaw / 食指侧摆
       - 129 # 7  Middle Finger Yaw / 中指侧摆
       - 86 # 8  Ring Finger Yaw / 无名指侧摆
       - 62 # 9  Pinky Finger Yaw / 小指侧摆

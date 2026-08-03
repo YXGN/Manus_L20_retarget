@@ -157,7 +157,7 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("fingertip_contact_debug", False)
         self.declare_parameter("fingertip_contact_close_orientation_completion", 0.25)
         self.declare_parameter("fingertip_contact_close_flexion_start", 0.40)
-        self.declare_parameter("fingertip_contact_release_flexion_open_completion", 0.18)
+        self.declare_parameter("fingertip_contact_release_flexion_open_completion", 0.65)
         self.declare_parameter("fingertip_contact_release_orientation_gamma", 2.5)
 
         self._lock = threading.Lock()

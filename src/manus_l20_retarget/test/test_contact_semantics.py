@@ -40,7 +40,7 @@ def _config_data() -> dict:
             "takeover_start_progress": 0.50,
             "full_takeover_progress": 1.00,
             "firm_contact_enter_activation": 1.00,
-            "firm_contact_release_activation": 1.00,
+            "release_start_progress_delta": 0.06,
             "activation_rise_sec": 0.10,
             "activation_release_sec": 0.10,
         },
@@ -85,8 +85,12 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         self.assertEqual(held.pair, "index")
         self.assertIsNone(held.event)
 
-        self.assertIsNone(state.update({**near_index, "index": 0.50}, 0.21).event)
-        released = state.update({**near_index, "index": 0.50}, 0.27)
+        partial_release = state.update({**near_index, "index": 0.50}, 0.21)
+        self.assertIsNone(partial_release.event)
+        self.assertEqual(partial_release.pair, "index")
+        self.assertGreater(partial_release.activation, 0.0)
+
+        released = state.update({**near_index, "index": 0.70}, 0.27)
         self.assertEqual(released.event, "released:index")
         self.assertIsNone(released.pair)
         self.assertEqual(released.activation, 0.0)
@@ -170,7 +174,7 @@ class FingertipContactSemanticsTest(unittest.TestCase):
             FingertipContactPhaseConfig(
                 close_orientation_completion=0.25,
                 close_flexion_start=0.40,
-                release_flexion_open_completion=0.18,
+                release_flexion_open_completion=0.65,
                 release_orientation_gamma=2.5,
             ),
             lambda slot: 255,
@@ -185,7 +189,8 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         blender.blend([100] * 20, profile, 1.0)
         releasing = blender.blend([100] * 20, profile, 0.82)
         for slot in (0, 1, 15, 16):
-            self.assertEqual(releasing[slot], 255)
+            self.assertGreater(releasing[slot], 140)
+            self.assertLess(releasing[slot], 160)
         self.assertLess(releasing[5], 20)
         self.assertLess(releasing[10], 20)
 
@@ -211,7 +216,7 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         self.assertEqual(full.pair, "index")
         self.assertAlmostEqual(full.activation, 1.0)
 
-    def test_full_takeover_can_saturate_before_exact_touch_and_hold_firmly(self) -> None:
+    def test_full_takeover_saturates_on_close_then_releases_continuously(self) -> None:
         data = _config_data()
         data["runtime"].update(
             {
@@ -219,7 +224,7 @@ class FingertipContactSemanticsTest(unittest.TestCase):
                 "takeover_start_progress": 0.50,
                 "full_takeover_progress": 0.75,
                 "firm_contact_enter_activation": 0.90,
-                "firm_contact_release_activation": 0.35,
+                "release_start_progress_delta": 0.06,
                 "activation_rise_sec": 0.0,
                 "activation_release_sec": 0.0,
             }
@@ -234,10 +239,66 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         self.assertEqual(full.activation, 1.0)
 
         still_held = state.update({**ratios, "index": 0.30}, 0.02)
-        self.assertEqual(still_held.activation, 1.0)
+        self.assertAlmostEqual(still_held.activation, (0.70 - 0.30) / (0.70 - 0.10))
 
         released_from_firm_hold = state.update({**ratios, "index": 0.36}, 0.03)
-        self.assertLess(released_from_firm_hold.activation, 1.0)
+        self.assertAlmostEqual(
+            released_from_firm_hold.activation,
+            (0.70 - 0.36) / (0.70 - 0.10),
+        )
+
+    def test_release_mode_is_monotonic_through_distance_noise(self) -> None:
+        data = _config_data()
+        data["runtime"].update(
+            {
+                "min_hold_sec": 0.0,
+                "takeover_start_progress": 0.50,
+                "full_takeover_progress": 0.75,
+                "firm_contact_enter_activation": 0.90,
+                "release_start_progress_delta": 0.06,
+                "activation_rise_sec": 0.0,
+                "activation_release_sec": 0.0,
+            }
+        )
+        config = parse_fingertip_contact_config(data)
+        state = FingertipContactStateMachine(config)
+        ratios = {"index": 0.10, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
+
+        state.update(ratios, 0.00)
+        full = state.update(ratios, 0.01)
+        self.assertEqual(full.activation, 1.0)
+
+        releasing = state.update({**ratios, "index": 0.36}, 0.02)
+        self.assertLess(releasing.activation, 1.0)
+
+        noisy_closer = state.update({**ratios, "index": 0.32}, 0.03)
+        self.assertLessEqual(noisy_closer.activation, releasing.activation)
+
+    def test_slow_close_noise_does_not_trigger_release_mode(self) -> None:
+        data = _config_data()
+        data["runtime"].update(
+            {
+                "min_hold_sec": 0.0,
+                "takeover_start_progress": 0.50,
+                "full_takeover_progress": 0.75,
+                "firm_contact_enter_activation": 0.90,
+                "release_start_progress_delta": 0.10,
+                "activation_rise_sec": 0.0,
+                "activation_release_sec": 0.0,
+            }
+        )
+        config = parse_fingertip_contact_config(data)
+        state = FingertipContactStateMachine(config)
+        ratios = {"index": 0.22, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
+
+        state.update(ratios, 0.00)
+        firm = state.update(ratios, 0.01)
+        self.assertEqual(firm.activation, 1.0)
+
+        # 0.24 is slightly farther than the closest firm distance, but the
+        # change is below release_start_progress_delta * calibrated_span.
+        jitter = state.update({**ratios, "index": 0.24}, 0.02)
+        self.assertEqual(jitter.activation, 1.0)
 
     def test_full_takeover_reaches_contact_command_for_dynamic_slots(self) -> None:
         data = _config_data()

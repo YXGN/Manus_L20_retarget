@@ -40,7 +40,7 @@ class FingertipContactConfig:
     takeover_start_progress: float
     full_takeover_progress: float
     firm_contact_enter_activation: float
-    firm_contact_release_activation: float
+    release_start_progress_delta: float
     activation_rise_sec: float
     activation_release_sec: float
 
@@ -57,7 +57,7 @@ class FingertipContactDecision:
 class FingertipContactPhaseConfig:
     close_orientation_completion: float = 0.25
     close_flexion_start: float = 0.40
-    release_flexion_open_completion: float = 0.18
+    release_flexion_open_completion: float = 0.65
     release_orientation_gamma: float = 2.5
     direction_change_deadband: float = 0.04
 
@@ -175,9 +175,9 @@ def parse_fingertip_contact_config(data: Any) -> FingertipContactConfig:
             0.90,
             allow_one=True,
         ),
-        firm_contact_release_activation=_unit_interval_parameter(
-            runtime.get("firm_contact_release_activation", 0.35),
-            0.35,
+        release_start_progress_delta=_unit_interval_parameter(
+            runtime.get("release_start_progress_delta", 0.06),
+            0.06,
             allow_one=True,
         ),
         activation_rise_sec=_nonnegative_float(
@@ -206,6 +206,10 @@ class FingertipContactStateMachine:
         self._release_since: float | None = None
         self._activation = 0.0
         self._firm_contact = False
+        self._release_mode = False
+        self._last_active_pair: str | None = None
+        self._last_active_distance: float | None = None
+        self._closest_firm_distance: float | None = None
         self._last_time: float | None = None
 
     def update(self, ratios: Mapping[str, float], now_sec: float) -> FingertipContactDecision:
@@ -230,9 +234,15 @@ class FingertipContactStateMachine:
         if self._active_pair is not None:
             profile = self._config.profiles[self._active_pair]
             value = ratios.get(self._active_pair)
-            if value is not None and self._takeover_target(profile, value) > 0.0:
-                self._release_since = None
-                return None
+            if value is not None:
+                keep_target = (
+                    self._release_target(profile, value)
+                    if self._firm_contact and self._release_mode
+                    else self._takeover_target(profile, value)
+                )
+                if keep_target > 0.0:
+                    self._release_since = None
+                    return None
             if self._release_since is None:
                 self._release_since = now
                 return None
@@ -299,6 +309,22 @@ class FingertipContactStateMachine:
             return 1.0
         return (start_distance - distance_ratio) / (start_distance - full_distance)
 
+    def _release_target(self, profile: FingertipContactProfile, distance_ratio: float) -> float:
+        """Continuous release amount from verified contact back to natural open.
+
+        Closing intentionally saturates before exact contact so the robot can
+        settle into a semantic grasp.  Releasing should not reuse that plateau:
+        once a firm contact has been reached, the human fingertip distance
+        directly controls how much semantic influence remains.
+        """
+        contact_distance = profile.contact_distance_p95_ratio
+        open_distance = profile.natural_open_distance_p05_ratio
+        if distance_ratio <= contact_distance:
+            return 1.0
+        if distance_ratio >= open_distance:
+            return 0.0
+        return (open_distance - distance_ratio) / (open_distance - contact_distance)
+
     def _update_activation(self, ratios: Mapping[str, float], now: float) -> None:
         if self._last_time is None:
             self._last_time = now
@@ -308,8 +334,50 @@ class FingertipContactStateMachine:
         if self._active_pair is not None:
             profile = self._config.profiles[self._active_pair]
             distance_ratio = ratios.get(self._active_pair)
-            target = 0.0 if distance_ratio is None else self._takeover_target(profile, distance_ratio)
-            target = self._firm_contact_target(target)
+            if distance_ratio is None:
+                target = 0.0
+            else:
+                previous_distance = (
+                    self._last_active_distance
+                    if self._last_active_pair == self._active_pair
+                    else None
+                )
+                opening = (
+                    previous_distance is not None
+                    and distance_ratio > previous_distance + 1e-6
+                )
+                close_target = self._takeover_target(profile, distance_ratio)
+                if close_target >= self._config.firm_contact_enter_activation:
+                    self._firm_contact = True
+                    if not self._release_mode or distance_ratio <= profile.contact_distance_p95_ratio:
+                        self._release_mode = False
+                    if not self._release_mode:
+                        self._closest_firm_distance = (
+                            distance_ratio
+                            if self._closest_firm_distance is None
+                            else min(self._closest_firm_distance, distance_ratio)
+                        )
+                if (
+                    self._firm_contact
+                    and not self._release_mode
+                    and opening
+                    and self._has_release_intent(profile, distance_ratio)
+                ):
+                    self._release_mode = True
+                if self._release_mode and distance_ratio <= profile.contact_distance_p95_ratio:
+                    self._release_mode = False
+                    self._closest_firm_distance = distance_ratio
+                if self._firm_contact and self._release_mode:
+                    # During release, raw fingertip distances can briefly move
+                    # closer again because of sensor jitter or soft tissue
+                    # motion.  Do not let that single-frame noise increase
+                    # semantic takeover; otherwise the phase blender flips
+                    # back to "closing" and the L20 flexion slots twitch.
+                    target = min(self._release_target(profile, distance_ratio), self._activation)
+                else:
+                    target = close_target
+                self._last_active_pair = self._active_pair
+                self._last_active_distance = distance_ratio
             duration = (
                 self._config.activation_rise_sec
                 if target >= self._activation
@@ -322,15 +390,17 @@ class FingertipContactStateMachine:
             self._activation = 0.0
             self._blend_pair = None
             self._firm_contact = False
+            self._release_mode = False
+            self._last_active_pair = None
+            self._last_active_distance = None
+            self._closest_firm_distance = None
 
-    def _firm_contact_target(self, target: float) -> float:
-        enter = self._config.firm_contact_enter_activation
-        release = min(enter, self._config.firm_contact_release_activation)
-        if target >= enter:
-            self._firm_contact = True
-        elif target <= release:
-            self._firm_contact = False
-        return 1.0 if self._firm_contact else target
+    def _has_release_intent(self, profile: FingertipContactProfile, distance_ratio: float) -> bool:
+        if self._closest_firm_distance is None:
+            return False
+        span = profile.natural_open_distance_p05_ratio - profile.contact_distance_p95_ratio
+        margin = max(1e-6, self._config.release_start_progress_delta * span)
+        return distance_ratio >= self._closest_firm_distance + margin
 
 
 class FingertipContactCommandBlender:

@@ -2,6 +2,7 @@ build/
 install/
 log/
 log.txt
+/imgui.ini
 
 # MANUS SDK shared libraries are larger than GitHub's normal file limit.
 # Keep them locally under src/ManusSDK/lib/ or use Git LFS before tracking.

@@ -54,12 +54,12 @@ ip -details link show can1
 
 第一次使用、换操作者、重新佩戴手套、或者感觉手指弯曲角度明显不准时，都建议重新标定 MANUS 手套。
 
-进入标定工具目录：
+在项目根目录直接启动新的标定 GUI：
 
 ```bash
-cd /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/third_party/sharpa-manus-sdk/client/CalibrationGUI
-./build.sh
-./CalibrationGUI.out
+source /opt/ros/humble/setup.bash
+cd /home/huangzizhe/Download/Manus_L20_retarget
+./deploy/manus-calibration/run.sh
 ```
 
 GUI 打开后按以下流程操作：
@@ -73,17 +73,19 @@ GUI 打开后按以下流程操作：
 标定完成后，程序会生成并自动同步以下文件：
 
 ```text
-/home/huangzizhe/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_left.mcal
-/home/huangzizhe/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_right.mcal
+/home/huangzizhe/Download/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_left.mcal
+/home/huangzizhe/Download/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_right.mcal
 ```
 
 确认文件已生成：
 
 ```bash
-ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_*.mcal
+ls -lh /home/huangzizhe/Download/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_*.mcal
 ```
 
 这些 `.mcal` 文件会在启动 `manus_data_publisher` 时自动加载，不需要手动复制。
+
+注意：这一节只是在标定 MANUS 手套自己的 `.mcal`。它会影响 MANUS 输出数据的基础质量，但不会生成 L20 关节映射 YAML；L20 的四指、拇指和语义对指标定仍然使用后面的 `calibration_capture` 命令。
 
 ## 4. 标定后数据检查
 
@@ -313,13 +315,23 @@ ros2 topic list | grep -E "manus|cb_"
 
 ## 8. 常见问题
 
-### 找不到 GLFW/glfw3.h
+### 标定 GUI 启动时报 `libManusSDK_Integrated.so` 相关错误
 
-安装 GUI 编译依赖：
+新 GUI 目录包优先使用 `deploy/manus-calibration/lib/libManusSDK_Integrated.so`。
+如果该文件还是约 134 字节的 Git LFS 指针，`run.sh` 会自动回退到当前工作区
+已有的 `src/ManusSDK/lib/libManusSDK_Integrated.so`。先检查两份文件：
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y build-essential libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev
+cd /home/huangzizhe/Download/Manus_L20_retarget
+ls -lh deploy/manus-calibration/lib/libManusSDK_Integrated.so
+ls -lh src/ManusSDK/lib/libManusSDK_Integrated.so
+```
+
+如果工作区的 SDK 也不存在，再拉取目录包的 LFS 文件：
+
+```bash
+git lfs install
+git lfs pull -I deploy/manus-calibration/lib/libManusSDK_Integrated.so
 ```
 
 ### 标定 GUI 可以打开，但显示没有手套

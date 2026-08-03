@@ -26,16 +26,24 @@ src/manus_ros2/calibration/Calibration_left.mcal
 src/manus_ros2/calibration/Calibration_right.mcal
 ```
 
-To create or refresh these files, build and run the Sharpa calibration GUI:
+To create or refresh these files, run the packaged MANUS calibration GUI from
+the workspace root:
 
 ```bash
-cd src/manus_l20_retarget/third_party/sharpa-manus-sdk/client/CalibrationGUI
-./build.sh
-./CalibrationGUI.out
+cd /home/huangzizhe/Download/Manus_L20_retarget
+./deploy/manus-calibration/run.sh
 ```
 
-After completing left/right calibration, copy or point the launch arguments at
-the generated files:
+When the GUI is launched from this workspace, `run.sh` points the output at
+`src/manus_ros2/calibration/` automatically. After completing left/right
+calibration, the default launch arguments load:
+
+```text
+src/manus_ros2/calibration/Calibration_left.mcal
+src/manus_ros2/calibration/Calibration_right.mcal
+```
+
+Use explicit paths only when you want to load files from another directory:
 
 ```bash
 ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
