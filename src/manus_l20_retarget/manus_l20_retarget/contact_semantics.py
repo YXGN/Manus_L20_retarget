@@ -269,19 +269,34 @@ def blend_fingertip_contact_command(
     command: list[int],
     profile: FingertipContactProfile,
     activation: float,
+    *,
+    slot_activations: Mapping[int, float] | None = None,
+    slot_targets: Mapping[int, int] | None = None,
 ) -> list[int]:
     if len(command) != 20:
         raise ValueError("L20 contact blending needs a 20-slot command")
     amount = max(0.0, min(1.0, float(activation)))
-    if amount <= 0.0:
+    if amount <= 0.0 and not slot_activations:
         return list(command)
 
     output = [clamp_u8(value) for value in command]
     for slot in profile.override_slots:
+        slot_amount = (
+            max(0.0, min(1.0, float(slot_activations[slot])))
+            if slot_activations is not None and slot in slot_activations
+            else amount
+        )
+        if slot_amount <= 0.0:
+            continue
         current = output[slot]
-        target_delta = int(profile.contact_command[slot]) - current
+        target = (
+            int(slot_targets[slot])
+            if slot_targets is not None and slot in slot_targets
+            else int(profile.contact_command[slot])
+        )
+        target_delta = target - current
         bounded_delta = max(-profile.max_command_delta, min(profile.max_command_delta, target_delta))
-        output[slot] = clamp_u8(current + amount * bounded_delta)
+        output[slot] = clamp_u8(current + slot_amount * bounded_delta)
     return output
 
 
