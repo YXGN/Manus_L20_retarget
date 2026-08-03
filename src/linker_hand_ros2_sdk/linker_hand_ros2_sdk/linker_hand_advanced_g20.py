@@ -20,8 +20,8 @@ HAND_JOINT = "G20"
 # 默认手指关节位置
 DEFAULT_POSITION =  [255, 255, 255, 255, 255, 255, 193, 148, 105, 42, 245, 255, 255, 255, 255, 255, 255, 255, 255, 255]
 # 默认手指关节速度/力矩。真机遥操作调试时使用保守值，避免上电瞬间动作过猛。
-DEFAULT_SPEED=[50, 50, 50, 50, 50]
-DEFAULT_TORQUE = [80, 80, 80, 80, 80]
+DEFAULT_SPEED=[80, 80, 80, 80, 80]
+DEFAULT_TORQUE = [255, 255, 255, 255, 255]
 # 压感传感器延迟时间
 TOUCH_SLEEP_TIME = 0.003
 
@@ -277,7 +277,7 @@ def main(args=None):
         parser.add_argument('--state_hz',   type=float, default=10.0)
         parser.add_argument('--can_sleep_ms', type=float, default=3.0)
 
-        args = parser.parse_args()
+        args, _ros_args = parser.parse_known_args()
         node = LinkerHandAdvancedG20(
             name="linker_hand_advanced_g20",
             hand_type=args.hand_type,

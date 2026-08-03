@@ -1,0 +1,13 @@
+linkerhand_l20_tactile_source:
+  ros__parameters:
+    enabled: true
+    mock: false
+    hand_joint: "L20"
+    hand_type: "left"
+    can_channel: "can0"
+    poll_rate_hz: 30.0
+    force_topic: "/manus_l20_haptics/force"
+    warn_poll_ms: 50.0
+    read_mode: "auto"            # auto | force | matrix | touch
+    matrix_reduce: "max"         # max | mean | sum
+    matrix_sleep_sec: 0.009

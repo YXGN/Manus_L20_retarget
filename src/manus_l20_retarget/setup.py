@@ -1,6 +1,9 @@
+from pathlib import Path
+
 from setuptools import find_packages, setup
 
 package_name = "manus_l20_retarget"
+config_files = sorted(str(path) for path in Path("config").glob("*.yaml"))
 
 setup(
     name=package_name,
@@ -11,12 +14,7 @@ setup(
         (f"share/{package_name}", ["package.xml"]),
         (
             f"share/{package_name}/config",
-            [
-                "config/flexion_right_calibration.yaml",
-                "config/finger_yaw_right_calibration.yaml",
-                "config/thumb_flexion_mapping.yaml",
-                "config/thumb_segment_open_vector_right.yaml",
-            ],
+            config_files,
         ),
     ],
     install_requires=["setuptools", "PyYAML"],
@@ -27,11 +25,10 @@ setup(
     license="Proprietary",
     entry_points={
         "console_scripts": [
-            "mock_manus_publisher = manus_l20_retarget.mock_manus_publisher:main",
-            "manus_somehand_retarget_node = manus_l20_retarget.manus_somehand_retarget_node:main",
-            "g20_joint_probe = manus_l20_retarget.g20_joint_probe:main",
-            "inspect_manus_landmarks = manus_l20_retarget.inspect_manus_landmarks:main",
-            "visualize_thumb_ik = manus_l20_retarget.visualize_thumb_ik:main",
+            "manus_l20_retarget_node = manus_l20_retarget.manus_l20_retarget_node:main",
+            "calibration_capture = manus_l20_retarget.calibration_capture:main",
+            "debug_tools = manus_l20_retarget.debug_tools:main",
+            "l20_simulation = manus_l20_retarget.l20_simulation:main",
         ],
     },
 )

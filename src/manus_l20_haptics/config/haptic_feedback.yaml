@@ -1,0 +1,13 @@
+manus_l20_haptic_feedback:
+  ros__parameters:
+    glove_id: 0
+    force_topic: "/manus_l20_haptics/force"
+    vib_topic: ""
+    normal_force_full_scale: 100.0
+    approach_full_scale: 200.0
+    attack_alpha: 0.35
+    release_alpha: 0.10
+    contact_threshold: 0.05
+    use_approach: false
+    max_intensity: 1.0
+    invert_fingers: false

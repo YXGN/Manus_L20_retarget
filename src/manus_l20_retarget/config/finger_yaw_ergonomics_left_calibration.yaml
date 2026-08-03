@@ -1,0 +1,164 @@
+schema: manus_l20.finger_yaw_calibration.v1
+finger_order:
+- index
+- middle
+- ring
+- pinky
+source: ergonomics
+source_mode: ergonomics_auto
+ergonomics_keys:
+- IndexSpread
+- MiddleSpread
+- RingSpread
+- PinkySpread
+ergonomics_source_ranges:
+  IndexSpread: 20.771563
+  MiddleSpread: 3.440454
+  RingSpread: 10.250537
+  PinkySpread: 42.640862
+command:
+  natural_open_command:
+  - 255    # 0  Thumb Base / 拇指根部弯曲
+  - 255    # 1  Index Finger Base / 食指根部弯曲
+  - 255    # 2  Middle Finger Base / 中指根部弯曲
+  - 255    # 3  Ring Finger Base / 无名指根部弯曲
+  - 255    # 4  Pinky Finger Base / 小指根部弯曲
+  - 128    # 5  Thumb Roll / 拇指 roll
+  - 163    # 6  Index Finger Yaw / 食指侧摆
+  - 129    # 7  Middle Finger Yaw / 中指侧摆
+  - 86     # 8  Ring Finger Yaw / 无名指侧摆
+  - 62     # 9  Pinky Finger Yaw / 小指侧摆
+  - 255    # 10 Thumb Yaw / 拇指 yaw
+  - 255    # 11 Reserved / 保留位
+  - 255    # 12 Reserved / 保留位
+  - 255    # 13 Reserved / 保留位
+  - 255    # 14 Reserved / 保留位
+  - 255    # 15 Thumb Tip / 拇指指尖弯曲
+  - 255    # 16 Index Finger Tip / 食指指尖弯曲
+  - 255    # 17 Middle Finger Tip / 中指指尖弯曲
+  - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
+  - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
+  finger_close_command:
+  - 255    # 0  Thumb Base / 拇指根部弯曲
+  - 255    # 1  Index Finger Base / 食指根部弯曲
+  - 255    # 2  Middle Finger Base / 中指根部弯曲
+  - 255    # 3  Ring Finger Base / 无名指根部弯曲
+  - 255    # 4  Pinky Finger Base / 小指根部弯曲
+  - 128    # 5  Thumb Roll / 拇指 roll
+  - 60     # 6  Index Finger Yaw / 食指侧摆
+  - 85     # 7  Middle Finger Yaw / 中指侧摆
+  - 136    # 8  Ring Finger Yaw / 无名指侧摆
+  - 166    # 9  Pinky Finger Yaw / 小指侧摆
+  - 255    # 10 Thumb Yaw / 拇指 yaw
+  - 255    # 11 Reserved / 保留位
+  - 255    # 12 Reserved / 保留位
+  - 255    # 13 Reserved / 保留位
+  - 255    # 14 Reserved / 保留位
+  - 255    # 15 Thumb Tip / 拇指指尖弯曲
+  - 255    # 16 Index Finger Tip / 食指指尖弯曲
+  - 255    # 17 Middle Finger Tip / 中指指尖弯曲
+  - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
+  - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
+  finger_spread_command:
+  - 255    # 0  Thumb Base / 拇指根部弯曲
+  - 255    # 1  Index Finger Base / 食指根部弯曲
+  - 255    # 2  Middle Finger Base / 中指根部弯曲
+  - 255    # 3  Ring Finger Base / 无名指根部弯曲
+  - 255    # 4  Pinky Finger Base / 小指根部弯曲
+  - 128    # 5  Thumb Roll / 拇指 roll
+  - 255    # 6  Index Finger Yaw / 食指侧摆
+  - 169    # 7  Middle Finger Yaw / 中指侧摆
+  - 46     # 8  Ring Finger Yaw / 无名指侧摆
+  - 0      # 9  Pinky Finger Yaw / 小指侧摆
+  - 255    # 10 Thumb Yaw / 拇指 yaw
+  - 255    # 11 Reserved / 保留位
+  - 255    # 12 Reserved / 保留位
+  - 255    # 13 Reserved / 保留位
+  - 255    # 14 Reserved / 保留位
+  - 255    # 15 Thumb Tip / 拇指指尖弯曲
+  - 255    # 16 Index Finger Tip / 食指指尖弯曲
+  - 255    # 17 Middle Finger Tip / 中指指尖弯曲
+  - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
+  - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
+samples:
+  natural_open:
+    yaw_rad:
+    - 6.630844
+    - -6.469546
+    - -15.420977
+    - -44.011039
+    ergonomics:
+      IndexDIPStretch: -11.305551
+      IndexMCPStretch: -19.694791
+      IndexPIPStretch: 5.861668
+      IndexSpread: 6.630844
+      MiddleDIPStretch: -16.46636
+      MiddleMCPStretch: -12.636009
+      MiddlePIPStretch: 7.381479
+      MiddleSpread: -6.469546
+      PinkyDIPStretch: -33.339895
+      PinkyMCPStretch: 31.060438
+      PinkyPIPStretch: -0.585671
+      PinkySpread: -44.011039
+      RingDIPStretch: -10.198413
+      RingMCPStretch: -0.831169
+      RingPIPStretch: 2.706591
+      RingSpread: -15.420977
+      ThumbDIPStretch: -25.407
+      ThumbMCPSpread: -7.799734
+      ThumbMCPStretch: 49.99755
+      ThumbPIPStretch: 7.41219
+  finger_close:
+    yaw_rad:
+    - -14.140719
+    - -9.91
+    - -5.17044
+    - -1.370177
+    ergonomics:
+      IndexDIPStretch: -24.741907
+      IndexMCPStretch: -1.677129
+      IndexPIPStretch: -0.170382
+      IndexSpread: -14.140719
+      MiddleDIPStretch: -28.380629
+      MiddleMCPStretch: -5.611267
+      MiddlePIPStretch: 13.34695
+      MiddleSpread: -9.91
+      PinkyDIPStretch: -43.207871
+      PinkyMCPStretch: 21.294132
+      PinkyPIPStretch: -0.465052
+      PinkySpread: -1.370177
+      RingDIPStretch: -35.14369
+      RingMCPStretch: -3.858176
+      RingPIPStretch: 23.210859
+      RingSpread: -5.17044
+      ThumbDIPStretch: -13.723328
+      ThumbMCPSpread: -6.452401
+      ThumbMCPStretch: 50.957531
+      ThumbPIPStretch: 28.554733
+  finger_spread:
+    yaw_rad:
+    - 7.531251
+    - -8.220175
+    - -19.362044
+    - -49.086513
+    ergonomics:
+      IndexDIPStretch: -15.710572
+      IndexMCPStretch: -14.342378
+      IndexPIPStretch: -0.015708
+      IndexSpread: 7.531251
+      MiddleDIPStretch: -19.91836
+      MiddleMCPStretch: -14.261488
+      MiddlePIPStretch: 6.070319
+      MiddleSpread: -8.220175
+      PinkyDIPStretch: -38.421588
+      PinkyMCPStretch: 27.075949
+      PinkyPIPStretch: -0.48589
+      PinkySpread: -49.086513
+      RingDIPStretch: -21.62227
+      RingMCPStretch: -12.699916
+      RingPIPStretch: 13.403081
+      RingSpread: -19.362044
+      ThumbDIPStretch: -23.437059
+      ThumbMCPSpread: -2.051181
+      ThumbMCPStretch: 49.217534
+      ThumbPIPStretch: 2.437829
