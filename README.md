@@ -70,3 +70,25 @@ MANUS_CALIBRATION_DIR=/path/to/src/manus_ros2/calibration ./deploy/manus-calibra
 
 The target machine still needs GLFW, OpenGL, gdk-pixbuf/GLib runtime support
 and a working MANUS Core or supported integrated SDK/hardware environment.
+
+### Git LFS 拉取说明
+
+部署包中的 `lib/libManusSDK_Integrated.so` 使用 Git LFS 存储。首次克隆或
+切换到包含部署包的版本后，需要先拉取 LFS 对象：
+
+```bash
+sudo apt install git-lfs
+git lfs install
+git lfs pull
+```
+
+确认动态库已经下载，而不是约 130 字节的指针文件：
+
+```bash
+git lfs ls-files
+ls -lh deploy/manus-calibration/lib/libManusSDK_Integrated.so
+```
+
+如果只需要源码 ROS2 节点，也可以继续使用
+`./scripts/fetch_manus_sdk.sh` 按需下载 `src/ManusSDK`，不必拉取部署包的
+LFS 对象。
