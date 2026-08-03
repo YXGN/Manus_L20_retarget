@@ -5,7 +5,7 @@ source:
   denominator: Index.MCP to Pinky.MCP
   unit: palm_width_ratio
 runtime:
-  enabled: ture
+  enabled: true
   min_hold_sec: 0.1
   release_hold_sec: 0.05
   candidate_gap_ratio: 0.02
@@ -28,11 +28,11 @@ contacts:
       - 16
       max_command_delta: 255
       contact_command:
-      - 194 # 0  Thumb Base / 拇指根部弯曲
-      - 107 # 1  Index Finger Base / 食指根部弯曲
-      - 128 # 2  Middle Finger Base / 中指根部弯曲
-      - 128 # 3  Ring Finger Base / 无名指根部弯曲
-      - 128 # 4  Pinky Finger Base / 小指根部弯曲
+      - 174 # 0  Thumb Base / 拇指根部弯曲
+      - 78 # 1  Index Finger Base / 食指根部弯曲
+      - 78 # 2  Middle Finger Base / 中指根部弯曲
+      - 78 # 3  Ring Finger Base / 无名指根部弯曲
+      - 78 # 4  Pinky Finger Base / 小指根部弯曲
       - 160 # 5  Thumb Roll / 拇指 roll
       - 142 # 6  Index Finger Yaw / 食指侧摆
       - 129 # 7  Middle Finger Yaw / 中指侧摆
@@ -43,11 +43,11 @@ contacts:
       - 255 # 12 Reserved / 保留位
       - 255 # 13 Reserved / 保留位
       - 255 # 14 Reserved / 保留位
-      - 100 # 15 Thumb Tip / 拇指指尖弯曲
-      - 125 # 16 Index Finger Tip / 食指指尖弯曲
-      - 128 # 17 Middle Finger Tip / 中指指尖弯曲
-      - 128 # 18 Ring Finger Tip / 无名指指尖弯曲
-      - 128 # 19 Pinky Finger Tip / 小指指尖弯曲
+      - 160 # 15 Thumb Tip / 拇指指尖弯曲
+      - 161 # 16 Index Finger Tip / 食指指尖弯曲
+      - 161 # 17 Middle Finger Tip / 中指指尖弯曲
+      - 161 # 18 Ring Finger Tip / 无名指指尖弯曲
+      - 161 # 19 Pinky Finger Tip / 小指指尖弯曲
   middle:
     human:
       natural_open_distance_p05_ratio: 3.907895
@@ -63,11 +63,11 @@ contacts:
       - 17
       max_command_delta: 255
       contact_command:
-      - 194 # 0  Thumb Base / 拇指根部弯曲
-      - 120 # 1  Index Finger Base / 食指根部弯曲
-      - 107 # 2  Middle Finger Base / 中指根部弯曲
-      - 120 # 3  Ring Finger Base / 无名指根部弯曲
-      - 120 # 4  Pinky Finger Base / 小指根部弯曲
+      - 174 # 0  Thumb Base / 拇指根部弯曲
+      - 78 # 1  Index Finger Base / 食指根部弯曲
+      - 78 # 2  Middle Finger Base / 中指根部弯曲
+      - 78 # 3  Ring Finger Base / 无名指根部弯曲
+      - 78 # 4  Pinky Finger Base / 小指根部弯曲
       - 128 # 5  Thumb Roll / 拇指 roll
       - 142 # 6  Index Finger Yaw / 食指侧摆
       - 129 # 7  Middle Finger Yaw / 中指侧摆
@@ -78,11 +78,11 @@ contacts:
       - 255 # 12 Reserved / 保留位
       - 255 # 13 Reserved / 保留位
       - 255 # 14 Reserved / 保留位
-      - 100 # 15 Thumb Tip / 拇指指尖弯曲
-      - 128 # 16 Index Finger Tip / 食指指尖弯曲
-      - 125 # 17 Middle Finger Tip / 中指指尖弯曲
-      - 128 # 18 Ring Finger Tip / 无名指指尖弯曲
-      - 128 # 19 Pinky Finger Tip / 小指指尖弯曲
+      - 160 # 15 Thumb Tip / 拇指指尖弯曲
+      - 161 # 16 Index Finger Tip / 食指指尖弯曲
+      - 161 # 17 Middle Finger Tip / 中指指尖弯曲
+      - 161 # 18 Ring Finger Tip / 无名指指尖弯曲
+      - 161 # 19 Pinky Finger Tip / 小指指尖弯曲
   ring:
     human:
       natural_open_distance_p05_ratio: 4.32647
@@ -98,11 +98,11 @@ contacts:
       - 18
       max_command_delta: 255
       contact_command:
-      - 194 # 0  Thumb Base / 拇指根部弯曲
-      - 120 # 1  Index Finger Base / 食指根部弯曲
-      - 120 # 2  Middle Finger Base / 中指根部弯曲
-      - 107 # 3  Ring Finger Base / 无名指根部弯曲
-      - 128 # 4  Pinky Finger Base / 小指根部弯曲
+      - 174 # 0  Thumb Base / 拇指根部弯曲
+      - 78 # 1  Index Finger Base / 食指根部弯曲
+      - 78 # 2  Middle Finger Base / 中指根部弯曲
+      - 78 # 3  Ring Finger Base / 无名指根部弯曲
+      - 78 # 4  Pinky Finger Base / 小指根部弯曲
       - 86 # 5  Thumb Roll / 拇指 roll
       - 142 # 6  Index Finger Yaw / 食指侧摆
       - 129 # 7  Middle Finger Yaw / 中指侧摆
@@ -113,11 +113,11 @@ contacts:
       - 255 # 12 Reserved / 保留位
       - 255 # 13 Reserved / 保留位
       - 255 # 14 Reserved / 保留位
-      - 100 # 15 Thumb Tip / 拇指指尖弯曲
-      - 128 # 16 Index Finger Tip / 食指指尖弯曲
-      - 128 # 17 Middle Finger Tip / 中指指尖弯曲
-      - 125 # 18 Ring Finger Tip / 无名指指尖弯曲
-      - 128 # 19 Pinky Finger Tip / 小指指尖弯曲
+      - 160 # 15 Thumb Tip / 拇指指尖弯曲
+      - 161 # 16 Index Finger Tip / 食指指尖弯曲
+      - 161 # 17 Middle Finger Tip / 中指指尖弯曲
+      - 161 # 18 Ring Finger Tip / 无名指指尖弯曲
+      - 161 # 19 Pinky Finger Tip / 小指指尖弯曲
   pinky:
     human:
       natural_open_distance_p05_ratio: 4.546273
@@ -133,11 +133,11 @@ contacts:
       - 19
       max_command_delta: 255
       contact_command:
-      - 194 # 0  Thumb Base / 拇指根部弯曲
-      - 120 # 1  Index Finger Base / 食指根部弯曲
-      - 120 # 2  Middle Finger Base / 中指根部弯曲
-      - 120 # 3  Ring Finger Base / 无名指根部弯曲
-      - 107 # 4  Pinky Finger Base / 小指根部弯曲
+      - 174 # 0  Thumb Base / 拇指根部弯曲
+      - 78 # 1  Index Finger Base / 食指根部弯曲
+      - 78 # 2  Middle Finger Base / 中指根部弯曲
+      - 78 # 3  Ring Finger Base / 无名指根部弯曲
+      - 78 # 4  Pinky Finger Base / 小指根部弯曲
       - 54 # 5  Thumb Roll / 拇指 roll
       - 142 # 6  Index Finger Yaw / 食指侧摆
       - 129 # 7  Middle Finger Yaw / 中指侧摆
@@ -148,8 +148,8 @@ contacts:
       - 255 # 12 Reserved / 保留位
       - 255 # 13 Reserved / 保留位
       - 255 # 14 Reserved / 保留位
-      - 100 # 15 Thumb Tip / 拇指指尖弯曲
-      - 128 # 16 Index Finger Tip / 食指指尖弯曲
-      - 128 # 17 Middle Finger Tip / 中指指尖弯曲
-      - 128 # 18 Ring Finger Tip / 无名指指尖弯曲
-      - 125 # 19 Pinky Finger Tip / 小指指尖弯曲
+      - 160 # 15 Thumb Tip / 拇指指尖弯曲
+      - 161 # 16 Index Finger Tip / 食指指尖弯曲
+      - 161 # 17 Middle Finger Tip / 中指指尖弯曲
+      - 161 # 18 Ring Finger Tip / 无名指指尖弯曲
+      - 161 # 19 Pinky Finger Tip / 小指指尖弯曲

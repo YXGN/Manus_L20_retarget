@@ -21,7 +21,7 @@ tip_ergonomics_key_groups:
   - PinkyDIPStretch
 command:
   open_command:
-  - 160    # 0  Thumb Base / 拇指根部弯曲
+  - 255    # 0  Thumb Base / 拇指根部弯曲
   - 255    # 1  Index Finger Base / 食指根部弯曲
   - 255    # 2  Middle Finger Base / 中指根部弯曲
   - 255    # 3  Ring Finger Base / 无名指根部弯曲

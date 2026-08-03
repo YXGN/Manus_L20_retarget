@@ -10,11 +10,11 @@ manus_touch_vector:
 - 0.023688
 - 0.003382
 robot_open_command:
-- 254      # 0  Thumb Base / 拇指根部弯曲
-- 248      # 1  Index Finger Base / 食指根部弯曲
-- 246      # 2  Middle Finger Base / 中指根部弯曲
-- 249      # 3  Ring Finger Base / 无名指根部弯曲
-- 254      # 4  Pinky Finger Base / 小指根部弯曲
+- 255      # 0  Thumb Base / 拇指根部弯曲
+- 255      # 1  Index Finger Base / 食指根部弯曲
+- 255      # 2  Middle Finger Base / 中指根部弯曲
+- 255      # 3  Ring Finger Base / 无名指根部弯曲
+- 255      # 4  Pinky Finger Base / 小指根部弯曲
 - 128      # 5  Thumb Roll / 拇指 roll
 - 115      # 6  Index Finger Yaw / 食指侧摆
 - 111      # 7  Middle Finger Yaw / 中指侧摆

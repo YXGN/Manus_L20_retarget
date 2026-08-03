@@ -98,6 +98,64 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         for slot in set(range(20)) - set(profile.override_slots):
             self.assertEqual(blended[slot], 100)
 
+    def test_blend_can_advance_orientation_before_flexion(self) -> None:
+        data = _config_data()
+        for contact in data["contacts"].values():
+            contact["robot"]["max_command_delta"] = 255
+        profile = parse_fingertip_contact_config(data).profiles["index"]
+
+        blended = blend_fingertip_contact_command(
+            [100] * 20,
+            profile,
+            0.25,
+            slot_activations={
+                0: 0.0,
+                1: 0.0,
+                5: 1.0,
+                10: 1.0,
+                15: 0.0,
+                16: 0.0,
+            },
+        )
+
+        self.assertEqual(blended[5], 10)
+        self.assertEqual(blended[10], 10)
+        for slot in (0, 1, 15, 16):
+            self.assertEqual(blended[slot], 100)
+
+    def test_blend_can_release_flexion_toward_open_target(self) -> None:
+        data = _config_data()
+        for contact in data["contacts"].values():
+            contact["robot"]["max_command_delta"] = 255
+        profile = parse_fingertip_contact_config(data).profiles["index"]
+
+        blended = blend_fingertip_contact_command(
+            [100] * 20,
+            profile,
+            0.75,
+            slot_activations={
+                0: 1.0,
+                1: 0.5,
+                5: 0.0,
+                10: 0.0,
+                15: 1.0,
+                16: 0.5,
+            },
+            slot_targets={
+                0: 255,
+                1: 255,
+                15: 255,
+                16: 255,
+            },
+        )
+
+        self.assertEqual(blended[0], 255)
+        self.assertEqual(blended[15], 255)
+        self.assertEqual(blended[1], 178)
+        self.assertEqual(blended[16], 178)
+        self.assertEqual(blended[5], 100)
+        self.assertEqual(blended[10], 100)
+
     def test_distance_controls_full_pose_takeover(self) -> None:
         data = _config_data()
         data["runtime"].update(

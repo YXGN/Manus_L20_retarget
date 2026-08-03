@@ -101,6 +101,10 @@ def _hand_actions(
     enable_fingertip_contact_semantics,
     fingertip_contact_semantics_path,
     fingertip_contact_debug,
+    fingertip_contact_close_orientation_completion,
+    fingertip_contact_close_flexion_start,
+    fingertip_contact_release_flexion_open_completion,
+    fingertip_contact_release_orientation_gamma,
     thumb_segment_start,
     thumb_segment_end,
     thumb_segment_frame_path,
@@ -163,6 +167,10 @@ def _hand_actions(
                     "enable_fingertip_contact_semantics": enable_fingertip_contact_semantics,
                     "fingertip_contact_semantics_path": fingertip_contact_semantics_path,
                     "fingertip_contact_debug": fingertip_contact_debug,
+                    "fingertip_contact_close_orientation_completion": fingertip_contact_close_orientation_completion,
+                    "fingertip_contact_close_flexion_start": fingertip_contact_close_flexion_start,
+                    "fingertip_contact_release_flexion_open_completion": fingertip_contact_release_flexion_open_completion,
+                    "fingertip_contact_release_orientation_gamma": fingertip_contact_release_orientation_gamma,
                     "thumb_segment_start": thumb_segment_start,
                     "thumb_segment_end": thumb_segment_end,
                     "thumb_segment_frame_path": thumb_segment_frame_path,
@@ -303,12 +311,16 @@ def generate_manus_l20_launch(
             DeclareLaunchArgument("thumb_flexion_root_gamma", default_value="1.0"),
             DeclareLaunchArgument("thumb_flexion_tip_gamma", default_value="1.0"),
             DeclareLaunchArgument("thumb_ik_debug", default_value="false"),
-            DeclareLaunchArgument("enable_fingertip_contact_semantics", default_value="false"),
+            DeclareLaunchArgument("enable_fingertip_contact_semantics", default_value="true"),
             DeclareLaunchArgument(
                 "fingertip_contact_semantics_path",
                 default_value=_fingertip_contact_semantics_default(logic_type),
             ),
             DeclareLaunchArgument("fingertip_contact_debug", default_value="false"),
+            DeclareLaunchArgument("fingertip_contact_close_orientation_completion", default_value="0.25"),
+            DeclareLaunchArgument("fingertip_contact_close_flexion_start", default_value="0.40"),
+            DeclareLaunchArgument("fingertip_contact_release_flexion_open_completion", default_value="0.18"),
+            DeclareLaunchArgument("fingertip_contact_release_orientation_gamma", default_value="2.5"),
             DeclareLaunchArgument("thumb_segment_start", default_value="2"),
             DeclareLaunchArgument("thumb_segment_end", default_value="3"),
             DeclareLaunchArgument("thumb_segment_frame_path", default_value=_thumb_segment_frame_default(logic_type)),
@@ -376,6 +388,16 @@ def generate_manus_l20_launch(
                 enable_fingertip_contact_semantics=LaunchConfiguration("enable_fingertip_contact_semantics"),
                 fingertip_contact_semantics_path=LaunchConfiguration("fingertip_contact_semantics_path"),
                 fingertip_contact_debug=LaunchConfiguration("fingertip_contact_debug"),
+                fingertip_contact_close_orientation_completion=LaunchConfiguration(
+                    "fingertip_contact_close_orientation_completion"
+                ),
+                fingertip_contact_close_flexion_start=LaunchConfiguration("fingertip_contact_close_flexion_start"),
+                fingertip_contact_release_flexion_open_completion=LaunchConfiguration(
+                    "fingertip_contact_release_flexion_open_completion"
+                ),
+                fingertip_contact_release_orientation_gamma=LaunchConfiguration(
+                    "fingertip_contact_release_orientation_gamma"
+                ),
                 thumb_segment_start=LaunchConfiguration("thumb_segment_start"),
                 thumb_segment_end=LaunchConfiguration("thumb_segment_end"),
                 thumb_segment_frame_path=LaunchConfiguration("thumb_segment_frame_path"),
@@ -484,8 +506,12 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
         DeclareLaunchArgument("thumb_flexion_root_gamma", default_value="1.0"),
         DeclareLaunchArgument("thumb_flexion_tip_gamma", default_value="1.0"),
         DeclareLaunchArgument("thumb_ik_debug", default_value="false"),
-        DeclareLaunchArgument("enable_fingertip_contact_semantics", default_value="false"),
+        DeclareLaunchArgument("enable_fingertip_contact_semantics", default_value="true"),
         DeclareLaunchArgument("fingertip_contact_debug", default_value="false"),
+        DeclareLaunchArgument("fingertip_contact_close_orientation_completion", default_value="0.25"),
+        DeclareLaunchArgument("fingertip_contact_close_flexion_start", default_value="0.40"),
+        DeclareLaunchArgument("fingertip_contact_release_flexion_open_completion", default_value="0.18"),
+        DeclareLaunchArgument("fingertip_contact_release_orientation_gamma", default_value="2.5"),
         DeclareLaunchArgument("thumb_segment_start", default_value="2"),
         DeclareLaunchArgument("thumb_segment_end", default_value="3"),
         DeclareLaunchArgument("thumb_segment_scale", default_value="1.0"),
@@ -563,6 +589,16 @@ def generate_manus_l20_bimanual_launch() -> LaunchDescription:
             enable_fingertip_contact_semantics=LaunchConfiguration("enable_fingertip_contact_semantics"),
             fingertip_contact_semantics_path=LaunchConfiguration(fingertip_contact_semantics_path_name),
             fingertip_contact_debug=LaunchConfiguration("fingertip_contact_debug"),
+            fingertip_contact_close_orientation_completion=LaunchConfiguration(
+                "fingertip_contact_close_orientation_completion"
+            ),
+            fingertip_contact_close_flexion_start=LaunchConfiguration("fingertip_contact_close_flexion_start"),
+            fingertip_contact_release_flexion_open_completion=LaunchConfiguration(
+                "fingertip_contact_release_flexion_open_completion"
+            ),
+            fingertip_contact_release_orientation_gamma=LaunchConfiguration(
+                "fingertip_contact_release_orientation_gamma"
+            ),
             thumb_segment_start=LaunchConfiguration("thumb_segment_start"),
             thumb_segment_end=LaunchConfiguration("thumb_segment_end"),
             thumb_segment_frame_path=_thumb_segment_frame_default(hand_type),

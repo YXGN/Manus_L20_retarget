@@ -154,6 +154,10 @@ class ManusL20RetargetNode(Node):
         self.declare_parameter("enable_fingertip_contact_semantics", False)
         self.declare_parameter("fingertip_contact_semantics_path", "")
         self.declare_parameter("fingertip_contact_debug", False)
+        self.declare_parameter("fingertip_contact_close_orientation_completion", 0.25)
+        self.declare_parameter("fingertip_contact_close_flexion_start", 0.40)
+        self.declare_parameter("fingertip_contact_release_flexion_open_completion", 0.18)
+        self.declare_parameter("fingertip_contact_release_orientation_gamma", 2.5)
 
         self._lock = threading.Lock()
         self._latest_msg: ManusGlove | None = None
@@ -191,6 +195,28 @@ class ManusL20RetargetNode(Node):
         self._fingertip_contact_config: FingertipContactConfig | None = None
         self._fingertip_contact_state: FingertipContactStateMachine | None = None
         self._fingertip_contact_debug = bool(self.get_parameter("fingertip_contact_debug").value)
+        self._fingertip_contact_last_pair: str | None = None
+        self._fingertip_contact_last_activation = 0.0
+        self._fingertip_contact_is_closing = True
+        self._fingertip_contact_close_orientation_completion = _unit_interval_parameter(
+            self.get_parameter("fingertip_contact_close_orientation_completion").value,
+            0.25,
+            allow_one=True,
+        )
+        self._fingertip_contact_close_flexion_start = _unit_interval_parameter(
+            self.get_parameter("fingertip_contact_close_flexion_start").value,
+            0.40,
+            allow_one=False,
+        )
+        self._fingertip_contact_release_flexion_open_completion = _unit_interval_parameter(
+            self.get_parameter("fingertip_contact_release_flexion_open_completion").value,
+            0.18,
+            allow_one=True,
+        )
+        self._fingertip_contact_release_orientation_gamma = max(
+            0.05,
+            float(self.get_parameter("fingertip_contact_release_orientation_gamma").value),
+        )
         self._thumb_flexion_root_gamma = max(
             0.05,
             float(self.get_parameter("thumb_flexion_root_gamma").value),
@@ -606,6 +632,9 @@ class ManusL20RetargetNode(Node):
     def _reset_fingertip_contact_semantics(self) -> None:
         if self._fingertip_contact_state is not None:
             self._fingertip_contact_state.reset()
+        self._fingertip_contact_last_pair = None
+        self._fingertip_contact_last_activation = 0.0
+        self._fingertip_contact_is_closing = True
 
     def _thumb_segment_frame_parameter(self, path_value: str) -> dict[str, Any] | None:
         path_text = str(path_value).strip()
@@ -826,12 +855,89 @@ class ManusL20RetargetNode(Node):
 
         if decision.pair is not None and decision.activation > 0.0:
             profile = config.profiles[decision.pair]
-            command[:] = blend_fingertip_contact_command(command, profile, decision.activation)
+            slot_activations, slot_targets = self._fingertip_contact_phase_blend(
+                profile.override_slots,
+                decision.pair,
+                decision.activation,
+            )
+            command[:] = blend_fingertip_contact_command(
+                command,
+                profile,
+                decision.activation,
+                slot_activations=slot_activations,
+                slot_targets=slot_targets,
+            )
+        else:
+            self._fingertip_contact_last_pair = decision.pair
+            self._fingertip_contact_last_activation = decision.activation
+            self._fingertip_contact_is_closing = True
         if decision.event is not None and self._fingertip_contact_debug:
             rounded_ratios = {finger: round(value, 4) for finger, value in decision.ratios.items()}
             self.get_logger().info(
                 f"fingertip_contact {decision.event} activation={decision.activation:.3f} ratios={rounded_ratios}"
             )
+
+    def _fingertip_contact_phase_blend(
+        self,
+        override_slots: tuple[int, ...],
+        pair: str,
+        activation: float,
+    ) -> tuple[dict[int, float], dict[int, int]]:
+        amount = max(0.0, min(1.0, float(activation)))
+        last_activation = (
+            self._fingertip_contact_last_activation
+            if pair == self._fingertip_contact_last_pair
+            else 0.0
+        )
+        if amount > last_activation + 1e-4:
+            self._fingertip_contact_is_closing = True
+        elif amount < last_activation - 1e-4:
+            self._fingertip_contact_is_closing = False
+
+        orientation_slots = {5, 10}
+        flexion_slots = [slot for slot in override_slots if slot not in orientation_slots]
+        slot_activations: dict[int, float] = {}
+        slot_targets: dict[int, int] = {}
+
+        if self._fingertip_contact_is_closing:
+            orientation_amount = _complete_early_progress(
+                amount,
+                self._fingertip_contact_close_orientation_completion,
+            )
+            flexion_amount = _delayed_progress(
+                amount,
+                self._fingertip_contact_close_flexion_start,
+            )
+            for slot in orientation_slots.intersection(override_slots):
+                slot_activations[slot] = orientation_amount
+            for slot in flexion_slots:
+                slot_activations[slot] = flexion_amount
+        else:
+            flexion_open_amount = _complete_early_progress(
+                1.0 - amount,
+                self._fingertip_contact_release_flexion_open_completion,
+            )
+            orientation_amount = 1.0 - math.pow(
+                1.0 - amount,
+                self._fingertip_contact_release_orientation_gamma,
+            )
+            for slot in orientation_slots.intersection(override_slots):
+                slot_activations[slot] = orientation_amount
+            for slot in flexion_slots:
+                slot_activations[slot] = flexion_open_amount
+                slot_targets[slot] = self._fingertip_contact_open_command(slot)
+
+        self._fingertip_contact_last_pair = pair
+        self._fingertip_contact_last_activation = amount
+        return slot_activations, slot_targets
+
+    def _fingertip_contact_open_command(self, slot: int) -> int:
+        if self._thumb_flexion_ergonomics_mapping is not None:
+            if slot == 0:
+                return clamp_u8(self._thumb_flexion_ergonomics_mapping["root_open_cmd"])
+            if slot == 15:
+                return clamp_u8(self._thumb_flexion_ergonomics_mapping["tip_open_cmd"])
+        return clamp_u8(self._neutral_command[slot])
 
     def _thumb_segment_ik_command(self, base_command: list[int], landmarks: np.ndarray) -> list[int]:
         if self._adapter is None or self._thumb_segment_ik is None:
@@ -1025,6 +1131,32 @@ def _landmark_index_parameter(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return int(default)
     return max(0, min(20, index))
+
+
+def _unit_interval_parameter(value: Any, default: float, *, allow_one: bool) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        result = float(default)
+    if not math.isfinite(result):
+        result = float(default)
+    upper = 1.0 if allow_one else 1.0 - 1e-6
+    return max(0.0, min(upper, result))
+
+
+def _complete_early_progress(value: float, completion: float) -> float:
+    amount = max(0.0, min(1.0, float(value)))
+    if completion <= 1e-8:
+        return 1.0 if amount > 0.0 else 0.0
+    return max(0.0, min(1.0, amount / completion))
+
+
+def _delayed_progress(value: float, start: float) -> float:
+    amount = max(0.0, min(1.0, float(value)))
+    start = max(0.0, min(1.0 - 1e-6, float(start)))
+    if amount <= start:
+        return 0.0
+    return max(0.0, min(1.0, (amount - start) / (1.0 - start)))
 
 
 def _float_list_parameter(value: Any, default: list[float], *, length: int) -> list[float]:
