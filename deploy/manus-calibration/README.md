@@ -111,3 +111,16 @@ make
 ```bash
 MANUS_CALIBRATION_DIR=/path/to/src/manus_ros2/calibration ./run.sh
 ```
+
+### SDK 动态库与 Git LFS
+
+`lib/libManusSDK_Integrated.so` 由 Git LFS 管理，不会以普通 Git 大文件存储。
+首次克隆后请确认已安装 Git LFS，并执行：
+
+```bash
+git lfs install
+git lfs pull
+```
+
+如果 `git lfs pull` 后文件仍是约 130 字节的 LFS 指针文件，说明 LFS 对象
+尚未下载；此时不要启动 GUI，应先检查仓库 LFS 访问权限或使用独立发布包。
