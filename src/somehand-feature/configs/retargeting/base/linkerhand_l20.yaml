@@ -1,6 +1,0 @@
-extends: "./_universal_common.yaml"
-
-hand:
-  name: linkerhand_l20_right
-  side: right
-  mjcf_path: ../../../assets/mjcf/linkerhand_l20_right/model.xml

@@ -36,59 +36,17 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py start_manus:=true right_c
 
 See [CODE_STRUCTURE.md](CODE_STRUCTURE.md) for package ownership and `MANUS_L20_TELEOP_SOP.md` for the detailed calibration procedure.
 
-## Calibration GUI directory package
+## Qt calibration UI
 
-The calibration GUI source and packaging script are located at:
-
-```text
-src/manus_l20_retarget/third_party/sharpa-manus-sdk/client/CalibrationGUI/
-```
-
-Build or refresh the standalone package in `deploy/` with:
+The Qt application contains two calibration tabs: MANUS glove calibration
+produces `.mcal` files through the Integrated SDK, while MANUS-L20 calibration
+captures the ROS2 mapping YAML files.
 
 ```bash
-cd src/manus_l20_retarget/third_party/sharpa-manus-sdk/client/CalibrationGUI
-./package.sh ../../../../../../deploy/manus-calibration
+./tools/run_calibration_ui.sh
 ```
 
-Start it without sourcing the ROS workspace:
-
-```bash
-./deploy/manus-calibration/run.sh
-```
-
-The package contains the GUI executable, Integrated MANUS SDK, official GIF
-assets, and a writable `calibration/` directory. It can be copied as a whole
-to another Linux machine. When the package is inside this workspace, `run.sh`
-automatically finds `src/manus_ros2/calibration/`; when deployed independently,
-the `.mcal` files are saved inside the package's `calibration/` directory.
-Override the destination explicitly when needed:
-
-```bash
-MANUS_CALIBRATION_DIR=/path/to/src/manus_ros2/calibration ./deploy/manus-calibration/run.sh
-```
-
-The target machine still needs GLFW, OpenGL, gdk-pixbuf/GLib runtime support
-and a working MANUS Core or supported integrated SDK/hardware environment.
-
-### Git LFS 拉取说明
-
-部署包中的 `lib/libManusSDK_Integrated.so` 使用 Git LFS 存储。首次克隆或
-切换到包含部署包的版本后，需要先拉取 LFS 对象：
-
-```bash
-sudo apt install git-lfs
-git lfs install
-git lfs pull
-```
-
-确认动态库已经下载，而不是约 130 字节的指针文件：
-
-```bash
-git lfs ls-files
-ls -lh deploy/manus-calibration/lib/libManusSDK_Integrated.so
-```
-
-如果只需要源码 ROS2 节点，也可以继续使用
-`./scripts/fetch_manus_sdk.sh` 按需下载 `src/ManusSDK`，不必拉取部署包的
-LFS 对象。
+The launcher incrementally builds the MANUS publisher when needed, starts it
+if it is not already running, and saves glove calibration files in
+`src/manus_ros2/calibration/`. The UI does not send L20 motion commands during
+either calibration workflow.

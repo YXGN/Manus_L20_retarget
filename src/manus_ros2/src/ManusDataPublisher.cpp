@@ -1,11 +1,14 @@
 #include "ManusDataPublisher.hpp"
 #include "ManusSDKTypes.h"
+#include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <thread>
 #include <chrono>
 #include <set>
+#include <sstream>
 
 #include "ClientLogging.hpp"
 
@@ -62,6 +65,14 @@ bool RecoverStandardHandNodeMetadata(
     default: return false;
     }
 }
+
+std::string SanitizeStatusField(std::string p_Value)
+{
+    std::replace(p_Value.begin(), p_Value.end(), '\t', ' ');
+    std::replace(p_Value.begin(), p_Value.end(), '\n', ' ');
+    std::replace(p_Value.begin(), p_Value.end(), '\r', ' ');
+    return p_Value;
+}
 }
 
 ManusDataPublisher *ManusDataPublisher::s_Instance = nullptr;
@@ -81,6 +92,16 @@ ManusDataPublisher::ManusDataPublisher() : Node("manus_data_publisher")
     m_LoadCalibration = this->declare_parameter<bool>("load_calibration", true);
     m_LeftCalibrationPath = this->declare_parameter<std::string>("left_calibration_path", "");
     m_RightCalibrationPath = this->declare_parameter<std::string>("right_calibration_path", "");
+    m_CalibrationOutputDir = this->declare_parameter<std::string>(
+        "calibration_output_dir",
+        (std::filesystem::path(std::getenv("HOME") ? std::getenv("HOME") : ".") /
+         ".config" / "manus" / "calibration").string());
+
+    m_CalibrationStatusPublisher = create_publisher<std_msgs::msg::String>(
+        "manus/calibration/status", rclcpp::QoS(20).reliable());
+    m_CalibrationCommandSubscriber = create_subscription<std_msgs::msg::String>(
+        "manus/calibration/command", 10,
+        [this](const std_msgs::msg::String::SharedPtr msg) { OnCalibrationCommand(msg); });
 
     // Timer to publish the data
     m_PublishTimer = create_wall_timer(8.333333ms, [this]
@@ -312,6 +333,48 @@ void ManusDataPublisher::PublishCallback()
     if (m_Landscape == nullptr)
     {
         return;
+    }
+
+    std::set<uint32_t> t_ActiveGloveIds;
+    for (size_t i = 0; i < m_Landscape->gloveDevices.gloveCount; i++)
+    {
+        t_ActiveGloveIds.insert(m_Landscape->gloveDevices.gloves[i].id);
+    }
+    static std::set<uint32_t> s_LastCalibrationGloveIds;
+    if (t_ActiveGloveIds != s_LastCalibrationGloveIds)
+    {
+        s_LastCalibrationGloveIds = t_ActiveGloveIds;
+        PublishCalibrationGloves();
+    }
+    for (auto t_Publisher = m_GlovePublisher.begin(); t_Publisher != m_GlovePublisher.end();)
+    {
+        const uint32_t t_GloveId = t_Publisher->first;
+        if (t_ActiveGloveIds.count(t_GloveId) > 0)
+        {
+            ++t_Publisher;
+            continue;
+        }
+
+        ClientLog::print("Glove {} disconnected; removing its ROS topics.", t_GloveId);
+        m_VibrationSubscribers.erase(t_GloveId);
+        m_ForcedVibrationWarnedGloves.erase(t_GloveId);
+        m_VibrationSuccessLoggedGloves.erase(t_GloveId);
+        m_CalibratedGloves.erase(t_GloveId);
+        m_CalibrationMissingWarnedGloves.erase(t_GloveId);
+        m_PublishCountMap.erase(t_GloveId);
+        {
+            std::lock_guard<std::mutex> t_Lock(m_RawSkeletonMutex);
+            m_GloveDataMap.erase(t_GloveId);
+        }
+        {
+            std::lock_guard<std::mutex> t_Lock(m_ErgonomicsMutex);
+            m_ErgonomicsDataMap.erase(t_GloveId);
+        }
+        {
+            std::lock_guard<std::mutex> t_Lock(m_RawSensorDataMutex);
+            m_RawSensorDataMap.erase(t_GloveId);
+        }
+        t_Publisher = m_GlovePublisher.erase(t_Publisher);
     }
 
     static bool s_LicenseErrorShown = false;
@@ -723,6 +786,226 @@ void ManusDataPublisher::OnVibrationCommand(const manus_ros2_msgs::msg::ManusVib
             ClientLog::print("Vibration command sent to glove {}", glove_id);
         }
     }
+}
+
+void ManusDataPublisher::PublishCalibrationStatus(const std::string& p_Status)
+{
+    std_msgs::msg::String t_Message;
+    t_Message.data = p_Status;
+    m_CalibrationStatusPublisher->publish(t_Message);
+}
+
+void ManusDataPublisher::PublishCalibrationGloves()
+{
+    uint32_t t_LeftID = 0;
+    uint32_t t_RightID = 0;
+    int t_LeftFamily = -1;
+    int t_RightFamily = -1;
+    {
+        std::lock_guard<std::mutex> t_Lock(m_LandscapeMutex);
+        if (m_Landscape != nullptr)
+        {
+            for (size_t i = 0; i < m_Landscape->gloveDevices.gloveCount; ++i)
+            {
+                const auto& t_Glove = m_Landscape->gloveDevices.gloves[i];
+                if (t_Glove.side == Side_Left)
+                {
+                    t_LeftID = t_Glove.id;
+                    t_LeftFamily = static_cast<int>(t_Glove.familyType);
+                }
+                else if (t_Glove.side == Side_Right)
+                {
+                    t_RightID = t_Glove.id;
+                    t_RightFamily = static_cast<int>(t_Glove.familyType);
+                }
+            }
+        }
+    }
+    PublishCalibrationStatus(
+        "GLOVES\t" + std::to_string(t_LeftID) + "\t" + std::to_string(t_RightID) +
+        "\t" + std::to_string(t_LeftFamily) + "\t" + std::to_string(t_RightFamily));
+}
+
+bool ManusDataPublisher::SaveGloveCalibration(uint32_t p_GloveID, Side p_Side, std::string& p_Path)
+{
+    uint32_t t_Size = 0;
+    if (CoreSdk_GetGloveCalibrationSize(p_GloveID, &t_Size) != SDKReturnCode_Success || t_Size == 0)
+    {
+        return false;
+    }
+    std::vector<unsigned char> t_Data(t_Size);
+    if (CoreSdk_GetGloveCalibration(t_Data.data(), t_Size) != SDKReturnCode_Success)
+    {
+        return false;
+    }
+    std::error_code t_Error;
+    std::filesystem::create_directories(m_CalibrationOutputDir, t_Error);
+    if (t_Error)
+    {
+        return false;
+    }
+    const char* t_Hand = p_Side == Side_Left ? "left" : "right";
+    const auto t_Output = std::filesystem::path(m_CalibrationOutputDir) /
+        (std::string("Calibration_") + t_Hand + ".mcal");
+    std::ofstream t_File(t_Output, std::ios::binary);
+    if (!t_File.write(reinterpret_cast<const char*>(t_Data.data()), t_Data.size()))
+    {
+        return false;
+    }
+    p_Path = t_Output.string();
+    return true;
+}
+
+void ManusDataPublisher::OnCalibrationCommand(const std_msgs::msg::String::SharedPtr msg)
+{
+    if (!msg)
+    {
+        return;
+    }
+    const std::string& t_Command = msg->data;
+    if (t_Command == "status")
+    {
+        PublishCalibrationStatus("READY");
+        PublishCalibrationGloves();
+        return;
+    }
+    if (t_Command.rfind("start\t", 0) == 0)
+    {
+        if (m_CalibrationActive)
+        {
+            PublishCalibrationStatus("ERROR\t已有 MANUS 手套标定正在进行");
+            return;
+        }
+        const std::string t_Hand = t_Command.substr(6);
+        const Side t_Side = t_Hand == "left" ? Side_Left : t_Hand == "right" ? Side_Right : Side_Invalid;
+        const GloveLandscapeData t_Glove = [&]() {
+            std::lock_guard<std::mutex> t_Lock(m_LandscapeMutex);
+            if (m_Landscape != nullptr)
+            {
+                for (size_t i = 0; i < m_Landscape->gloveDevices.gloveCount; ++i)
+                {
+                    if (m_Landscape->gloveDevices.gloves[i].side == t_Side)
+                    {
+                        return m_Landscape->gloveDevices.gloves[i];
+                    }
+                }
+            }
+            return GloveLandscapeData{};
+        }();
+        if (t_Side == Side_Invalid || t_Glove.id == 0)
+        {
+            PublishCalibrationStatus("ERROR\t所选 MANUS 手套未连接");
+            return;
+        }
+
+        GloveCalibrationArgs t_Args{t_Glove.id};
+        uint32_t t_StepCount = 0;
+        bool t_Result = false;
+        if (CoreSdk_GloveCalibrationGetNumberOfSteps(t_Args, &t_StepCount) != SDKReturnCode_Success ||
+            t_StepCount == 0 ||
+            CoreSdk_GloveCalibrationStart(t_Args, &t_Result) != SDKReturnCode_Success || !t_Result)
+        {
+            PublishCalibrationStatus("ERROR\tMANUS SDK 无法开始手套标定");
+            return;
+        }
+
+        m_CalibrationGloveID = t_Glove.id;
+        m_CalibrationSide = t_Side;
+        m_CalibrationStep = 0;
+        m_CalibrationStepCount = t_StepCount;
+        m_CalibrationActive = true;
+        m_CalibrationStepComplete = false;
+        PublishCalibrationStatus(
+            "STARTED\t" + t_Hand + "\t" + std::to_string(t_Glove.id) + "\t" +
+            std::to_string(t_StepCount) + "\t" + std::to_string(static_cast<int>(t_Glove.familyType)));
+    }
+    else if (t_Command == "capture")
+    {
+        if (!m_CalibrationActive || m_CalibrationStepComplete)
+        {
+            PublishCalibrationStatus("ERROR\t当前 MANUS 标定步骤不可采集");
+            return;
+        }
+        GloveCalibrationStepArgs t_Args{m_CalibrationGloveID, m_CalibrationStep};
+        bool t_Result = false;
+        PublishCalibrationStatus(
+            "CAPTURING\t" + std::to_string(m_CalibrationStep) + "\t" + std::to_string(m_CalibrationStepCount));
+        if (CoreSdk_GloveCalibrationStartStep(t_Args, &t_Result) != SDKReturnCode_Success || !t_Result)
+        {
+            PublishCalibrationStatus("ERROR\tMANUS SDK 当前步骤标定失败，可重新采集");
+            return;
+        }
+        m_CalibrationStepComplete = true;
+        PublishCalibrationStatus(
+            "STEP_DONE\t" + std::to_string(m_CalibrationStep) + "\t" + std::to_string(m_CalibrationStepCount));
+        return;
+    }
+    else if (t_Command == "next")
+    {
+        if (!m_CalibrationActive || !m_CalibrationStepComplete)
+        {
+            PublishCalibrationStatus("ERROR\t请先完成当前 MANUS 标定步骤");
+            return;
+        }
+        if (m_CalibrationStep + 1 < m_CalibrationStepCount)
+        {
+            ++m_CalibrationStep;
+            m_CalibrationStepComplete = false;
+        }
+        else
+        {
+            GloveCalibrationArgs t_Args{m_CalibrationGloveID};
+            bool t_Result = false;
+            if (CoreSdk_GloveCalibrationFinish(t_Args, &t_Result) != SDKReturnCode_Success || !t_Result)
+            {
+                PublishCalibrationStatus("ERROR\tMANUS SDK 无法完成手套标定");
+                return;
+            }
+            std::string t_Path;
+            if (!SaveGloveCalibration(m_CalibrationGloveID, m_CalibrationSide, t_Path))
+            {
+                m_CalibrationActive = false;
+                m_CalibrationStepComplete = false;
+                PublishCalibrationStatus("ERROR\t手套标定已完成，但 .mcal 文件保存失败");
+                return;
+            }
+            m_CalibrationActive = false;
+            m_CalibrationStepComplete = false;
+            PublishCalibrationStatus("FINISHED\t" + SanitizeStatusField(t_Path));
+            return;
+        }
+    }
+    else if (t_Command == "stop")
+    {
+        if (m_CalibrationActive)
+        {
+            GloveCalibrationArgs t_Args{m_CalibrationGloveID};
+            bool t_Result = false;
+            CoreSdk_GloveCalibrationStop(t_Args, &t_Result);
+        }
+        m_CalibrationActive = false;
+        m_CalibrationStepComplete = false;
+        PublishCalibrationStatus("STOPPED");
+        return;
+    }
+    else
+    {
+        PublishCalibrationStatus("ERROR\t未知 MANUS 标定命令");
+        return;
+    }
+
+    GloveCalibrationStepArgs t_StepArgs{m_CalibrationGloveID, m_CalibrationStep};
+    GloveCalibrationStepData t_Data;
+    GloveCalibrationStepData_Init(&t_Data);
+    if (CoreSdk_GloveCalibrationGetStepData(t_StepArgs, &t_Data) != SDKReturnCode_Success)
+    {
+        PublishCalibrationStatus("ERROR\t无法读取 MANUS 标定步骤说明");
+        return;
+    }
+    PublishCalibrationStatus(
+        "STEP_READY\t" + std::to_string(m_CalibrationStep) + "\t" +
+        std::to_string(m_CalibrationStepCount) + "\t" + SanitizeStatusField(t_Data.title) +
+        "\t" + SanitizeStatusField(t_Data.description) + "\t" + std::to_string(t_Data.time));
 }
 
 void ManusDataPublisher::LoadConfiguredGloveCalibration(uint32_t p_GloveID, Side p_Side)

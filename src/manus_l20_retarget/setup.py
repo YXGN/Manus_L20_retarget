@@ -26,7 +26,6 @@ setup(
     entry_points={
         "console_scripts": [
             "manus_l20_retarget_node = manus_l20_retarget.manus_l20_retarget_node:main",
-            "calibration_capture = manus_l20_retarget.calibration_capture:main",
             "debug_tools = manus_l20_retarget.debug_tools:main",
             "l20_simulation = manus_l20_retarget.l20_simulation:main",
         ],

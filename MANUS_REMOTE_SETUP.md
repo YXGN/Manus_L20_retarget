@@ -115,7 +115,7 @@ cd ~/agx_arm_ws/src/Manus_L20_retarget
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-ros2 launch bringup manus_somehand_linkerhand_g20.launch.py start_manus:=true
+ros2 launch bringup manus_l20_linkerhand_g20_right.launch.py start_manus:=true can:=can0
 ```
 
 Verify topics:

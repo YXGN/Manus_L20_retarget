@@ -54,20 +54,19 @@ ip -details link show can1
 
 第一次使用、换操作者、重新佩戴手套、或者感觉手指弯曲角度明显不准时，都建议重新标定 MANUS 手套。
 
-进入标定工具目录：
+启动 Qt 标定工作台：
 
 ```bash
-cd /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/third_party/sharpa-manus-sdk/client/CalibrationGUI
-./build.sh
-./CalibrationGUI.out
+cd /home/huangzizhe/Manus_L20_retarget
+./tools/run_calibration_ui.sh
 ```
 
-GUI 打开后按以下流程操作：
+在 `MANUS 手套标定` 标签页按以下流程操作：
 
-1. 选择 `Left Glove` 或 `Right Glove`。
-2. 点击 `Start Calibration`，或按 `F5`。
+1. 选择左手或右手手套。
+2. 点击 `开始标定`。
 3. 按界面提示做手势。
-4. 每一步完成后点击 `Next Step`，或按 `F9`。
+4. 每一步完成后点击 `下一步`。
 5. 左右手都标定一遍。
 
 标定完成后，程序会生成并自动同步以下文件：

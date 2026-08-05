@@ -26,16 +26,15 @@ src/manus_ros2/calibration/Calibration_left.mcal
 src/manus_ros2/calibration/Calibration_right.mcal
 ```
 
-To create or refresh these files, build and run the Sharpa calibration GUI:
+To create or refresh these files, run the Qt calibration UI and select the
+`MANUS 手套标定` tab:
 
 ```bash
-cd src/manus_l20_retarget/third_party/sharpa-manus-sdk/client/CalibrationGUI
-./build.sh
-./CalibrationGUI.out
+./tools/run_calibration_ui.sh
 ```
 
-After completing left/right calibration, copy or point the launch arguments at
-the generated files:
+After completing left/right calibration, point the launch arguments at the
+generated files when non-default paths are required:
 
 ```bash
 ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
