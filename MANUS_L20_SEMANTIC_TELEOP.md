@@ -228,6 +228,27 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
   thumb_ik_debug:=true
 ```
 
+开启 MANUS 触觉手套振动反馈时，用这一条：
+
+```bash
+source /opt/ros/humble/setup.bash
+cd /home/huangzizhe/Download/Manus_L20_retarget
+source install/setup.bash
+
+ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
+  start_manus:=true \
+  right_can:=can0 \
+  left_can:=can1 \
+  is_touch:=false \
+  right_input_topic:=/manus_glove_0 \
+  left_input_topic:=/manus_glove_1 \
+  enable_haptics:=true \
+  right_haptic_glove_id:=0 \
+  left_haptic_glove_id:=1 \
+  fingertip_contact_debug:=true \
+  thumb_ik_debug:=true
+```
+
 当前 launch 默认速度是：
 
 ```text
