@@ -16,6 +16,7 @@
 #include "manus_ros2_msgs/msg/manus_glove.hpp"
 #include "manus_ros2_msgs/msg/manus_raw_node.hpp"
 #include "manus_ros2_msgs/msg/manus_vibration_command.hpp"
+#include "std_msgs/msg/string.hpp"
 
 /// @brief The type of connection to core.
 enum class ConnectionType : int
@@ -119,6 +120,14 @@ protected:
     // Callback for vibration command
     void OnVibrationCommand(const manus_ros2_msgs::msg::ManusVibrationCommand::SharedPtr msg, uint32_t glove_id);
 
+    void OnCalibrationCommand(const std_msgs::msg::String::SharedPtr msg);
+
+    void PublishCalibrationStatus(const std::string& p_Status);
+
+    void PublishCalibrationGloves();
+
+    bool SaveGloveCalibration(uint32_t p_GloveID, Side p_Side, std::string& p_Path);
+
     GloveLandscapeData GetGloveLandscapeData(uint32_t p_GloveID);
 
     void LoadConfiguredGloveCalibration(uint32_t p_GloveID, Side p_Side);
@@ -161,6 +170,16 @@ protected:
     std::map<uint32_t, rclcpp::Subscription<manus_ros2_msgs::msg::ManusVibrationCommand>::SharedPtr> m_VibrationSubscribers;
     std::set<uint32_t> m_ForcedVibrationWarnedGloves;
     std::set<uint32_t> m_VibrationSuccessLoggedGloves;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr m_CalibrationStatusPublisher;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr m_CalibrationCommandSubscriber;
+    std::string m_CalibrationOutputDir;
+    uint32_t m_CalibrationGloveID = 0;
+    uint32_t m_CalibrationStep = 0;
+    uint32_t m_CalibrationStepCount = 0;
+    Side m_CalibrationSide = Side_Invalid;
+    bool m_CalibrationActive = false;
+    bool m_CalibrationStepComplete = false;
 
     bool m_LoadCalibration = true;
     std::string m_LeftCalibrationPath;

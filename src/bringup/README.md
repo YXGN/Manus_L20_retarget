@@ -26,24 +26,15 @@ src/manus_ros2/calibration/Calibration_left.mcal
 src/manus_ros2/calibration/Calibration_right.mcal
 ```
 
-To create or refresh these files, run the packaged MANUS calibration GUI from
-the workspace root:
+To create or refresh these files, run the Qt calibration UI and select the
+`MANUS 手套标定` tab:
 
 ```bash
-cd /home/huangzizhe/Download/Manus_L20_retarget
-./deploy/manus-calibration/run.sh
+./tools/run_calibration_ui.sh
 ```
 
-When the GUI is launched from this workspace, `run.sh` points the output at
-`src/manus_ros2/calibration/` automatically. After completing left/right
-calibration, the default launch arguments load:
-
-```text
-src/manus_ros2/calibration/Calibration_left.mcal
-src/manus_ros2/calibration/Calibration_right.mcal
-```
-
-Use explicit paths only when you want to load files from another directory:
+After completing left/right calibration, point the launch arguments at the
+generated files when non-default paths are required:
 
 ```bash
 ros2 launch bringup manus_l20_linkerhand_g20.launch.py \

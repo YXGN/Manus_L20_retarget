@@ -41,6 +41,7 @@ def _config_data() -> dict:
             "full_takeover_progress": 1.00,
             "firm_contact_enter_activation": 1.00,
             "release_start_progress_delta": 0.06,
+            "reclose_start_progress_delta": 0.02,
             "activation_rise_sec": 0.10,
             "activation_release_sec": 0.10,
         },
@@ -65,9 +66,9 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         ratios = thumb_fingertip_distance_ratios(skeleton)
 
         self.assertAlmostEqual(ratios["index"], 0.25)
-        self.assertAlmostEqual(ratios["middle"], 0.50)
-        self.assertAlmostEqual(ratios["ring"], 0.75)
-        self.assertAlmostEqual(ratios["pinky"], 1.00)
+        self.assertNotIn("middle", ratios)
+        self.assertNotIn("ring", ratios)
+        self.assertNotIn("pinky", ratios)
 
     def test_state_machine_latches_then_releases_with_hysteresis(self) -> None:
         config = parse_fingertip_contact_config(_config_data())
@@ -225,6 +226,7 @@ class FingertipContactSemanticsTest(unittest.TestCase):
                 "full_takeover_progress": 0.75,
                 "firm_contact_enter_activation": 0.90,
                 "release_start_progress_delta": 0.06,
+                "reclose_start_progress_delta": 0.02,
                 "activation_rise_sec": 0.0,
                 "activation_release_sec": 0.0,
             }
@@ -256,6 +258,7 @@ class FingertipContactSemanticsTest(unittest.TestCase):
                 "full_takeover_progress": 0.75,
                 "firm_contact_enter_activation": 0.90,
                 "release_start_progress_delta": 0.06,
+                "reclose_start_progress_delta": 0.02,
                 "activation_rise_sec": 0.0,
                 "activation_release_sec": 0.0,
             }
@@ -271,8 +274,68 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         releasing = state.update({**ratios, "index": 0.36}, 0.02)
         self.assertLess(releasing.activation, 1.0)
 
-        noisy_closer = state.update({**ratios, "index": 0.32}, 0.03)
+        noisy_closer = state.update({**ratios, "index": 0.355}, 0.03)
         self.assertLessEqual(noisy_closer.activation, releasing.activation)
+
+    def test_release_mode_allows_intentional_reclose_before_full_open(self) -> None:
+        data = _config_data()
+        data["runtime"].update(
+            {
+                "min_hold_sec": 0.0,
+                "takeover_start_progress": 0.50,
+                "full_takeover_progress": 0.75,
+                "firm_contact_enter_activation": 0.90,
+                "release_start_progress_delta": 0.06,
+                "reclose_start_progress_delta": 0.02,
+                "activation_rise_sec": 0.0,
+                "activation_release_sec": 0.0,
+            }
+        )
+        config = parse_fingertip_contact_config(data)
+        state = FingertipContactStateMachine(config)
+        ratios = {"index": 0.10, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
+
+        state.update(ratios, 0.00)
+        full = state.update(ratios, 0.01)
+        self.assertEqual(full.activation, 1.0)
+
+        releasing = state.update({**ratios, "index": 0.36}, 0.02)
+        self.assertLess(releasing.activation, 1.0)
+
+        reclosing = state.update({**ratios, "index": 0.28}, 0.03)
+        self.assertGreater(reclosing.activation, releasing.activation)
+        self.assertEqual(reclosing.pair, "index")
+
+    def test_reclose_after_wide_release_keeps_following_distance_curve(self) -> None:
+        data = _config_data()
+        data["runtime"].update(
+            {
+                "min_hold_sec": 0.0,
+                "takeover_start_progress": 0.50,
+                "full_takeover_progress": 0.75,
+                "firm_contact_enter_activation": 0.90,
+                "release_start_progress_delta": 0.06,
+                "reclose_start_progress_delta": 0.02,
+                "activation_rise_sec": 0.0,
+                "activation_release_sec": 0.0,
+            }
+        )
+        config = parse_fingertip_contact_config(data)
+        state = FingertipContactStateMachine(config)
+        ratios = {"index": 0.10, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
+
+        state.update(ratios, 0.00)
+        full = state.update(ratios, 0.01)
+        self.assertEqual(full.activation, 1.0)
+
+        wide_release = state.update({**ratios, "index": 0.50}, 0.02)
+        self.assertAlmostEqual(wide_release.activation, (0.70 - 0.50) / (0.70 - 0.10))
+
+        reclose_start = state.update({**ratios, "index": 0.47}, 0.03)
+        self.assertGreater(reclose_start.activation, wide_release.activation)
+
+        reclose_continue = state.update({**ratios, "index": 0.46}, 0.04)
+        self.assertGreater(reclose_continue.activation, reclose_start.activation)
 
     def test_slow_close_noise_does_not_trigger_release_mode(self) -> None:
         data = _config_data()
@@ -283,6 +346,7 @@ class FingertipContactSemanticsTest(unittest.TestCase):
                 "full_takeover_progress": 0.75,
                 "firm_contact_enter_activation": 0.90,
                 "release_start_progress_delta": 0.10,
+                "reclose_start_progress_delta": 0.02,
                 "activation_rise_sec": 0.0,
                 "activation_release_sec": 0.0,
             }
@@ -313,13 +377,13 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         for slot in set(range(20)) - set(profile.override_slots):
             self.assertEqual(blended[slot], 100)
 
-    def test_ambiguous_two_finger_contact_does_not_latch(self) -> None:
+    def test_non_index_contact_does_not_latch(self) -> None:
         config = parse_fingertip_contact_config(_config_data())
         state = FingertipContactStateMachine(config)
-        ambiguous = {"index": 0.10, "middle": 0.11, "ring": 0.70, "pinky": 0.80}
+        middle_only = {"index": 0.70, "middle": 0.10, "ring": 0.70, "pinky": 0.80}
 
-        self.assertIsNone(state.update(ambiguous, 0.00).pair)
-        self.assertIsNone(state.update(ambiguous, 0.20).pair)
+        self.assertIsNone(state.update(middle_only, 0.00).pair)
+        self.assertIsNone(state.update(middle_only, 0.20).pair)
 
 
 if __name__ == "__main__":

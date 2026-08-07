@@ -35,3 +35,18 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py start_manus:=true right_c
 ```
 
 See [CODE_STRUCTURE.md](CODE_STRUCTURE.md) for package ownership and `MANUS_L20_TELEOP_SOP.md` for the detailed calibration procedure.
+
+## Qt calibration UI
+
+The Qt application contains two calibration tabs: MANUS glove calibration
+produces `.mcal` files through the Integrated SDK, while MANUS-L20 calibration
+captures the ROS2 mapping YAML files.
+
+```bash
+./tools/run_calibration_ui.sh
+```
+
+The launcher incrementally builds the MANUS publisher when needed, starts it
+if it is not already running, and saves glove calibration files in
+`src/manus_ros2/calibration/`. The UI does not send L20 motion commands during
+either calibration workflow.

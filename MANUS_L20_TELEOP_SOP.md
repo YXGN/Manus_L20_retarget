@@ -1,24 +1,46 @@
 # MANUS 手套到 LinkerHand L20 遥操作流程
 
-本文档面向第一次拿到 MANUS 手套和 LinkerHand L20 的操作者，流程从手套标定开始，到启动双手遥操作程序结束。
+本文档面向第一次拿到 MANUS 手套和 LinkerHand L20 的操作者，流程从 Qt 标定开始，到启动双手遥操作程序结束。
+
+本文统一使用 ASCII 路径 `/home/huangzizhe/Manus_L20_retarget-main`。它指向当前工程
+`/home/huangzizhe/下载/Manus_L20_retarget-main`，用于避免 ROS 2 接口生成器处理中文路径时失败。
 
 ## 1. 准备环境
 
-打开一个终端，进入工作区并加载 ROS 2 环境：
+打开一个终端，退出 Conda 环境，进入工作区并加载 ROS 2 环境：
 
 ```bash
-cd /home/huangzizhe/Manus_L20_retarget
+conda deactivate
+cd /home/huangzizhe/Manus_L20_retarget-main
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install
-source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
+colcon build --symlink-install --packages-up-to bringup \
+  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
+source /home/huangzizhe/Manus_L20_retarget-main/install/setup.bash
 ```
 
-如果只改过代码，后续一般只需要：
+如果之前构建失败过，第一次恢复构建时使用：
 
 ```bash
-cd /home/huangzizhe/Manus_L20_retarget
-source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
+cd /home/huangzizhe/Manus_L20_retarget-main
+colcon build --symlink-install --packages-up-to bringup --cmake-clean-cache \
+  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
 ```
+
+如果只改过 Python 代码，后续一般只需要：
+
+```bash
+cd /home/huangzizhe/Manus_L20_retarget-main
+source /home/huangzizhe/Manus_L20_retarget-main/install/setup.bash
+```
+
+确认 ROS 使用的是当前工作区：
+
+```bash
+ros2 pkg prefix bringup
+ros2 pkg prefix manus_l20_retarget
+```
+
+输出都应以 `/home/huangzizhe/Manus_L20_retarget-main/install/` 开头。
 
 ## 2. 连接硬件
 
@@ -54,54 +76,69 @@ ip -details link show can1
 
 第一次使用、换操作者、重新佩戴手套、或者感觉手指弯曲角度明显不准时，都建议重新标定 MANUS 手套。
 
-在项目根目录直接启动新的标定 GUI：
+启动 Qt 标定工作台。脚本会自动启动 MANUS 数据发布器；不要在另一个终端重复运行 `manus_data_publisher`：
 
 ```bash
-source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Download/Manus_L20_retarget
-./deploy/manus-calibration/run.sh
+conda deactivate
+cd /home/huangzizhe/Manus_L20_retarget-main
+./tools/run_calibration_ui.sh
 ```
 
-GUI 打开后按以下流程操作：
+在 Qt 界面依次使用两个标签页。
 
-1. 选择 `Left Glove` 或 `Right Glove`。
-2. 点击 `Start Calibration`，或按 `F5`。
+### 3.1 MANUS 手套标定
+
+在 `MANUS 手套标定` 标签页按以下流程操作：
+
+1. 选择左手或右手手套。
+2. 点击 `开始标定`。
 3. 按界面提示做手势。
-4. 每一步完成后点击 `Next Step`，或按 `F9`。
+4. 每一步完成后点击 `下一步`。
 5. 左右手都标定一遍。
 
 标定完成后，程序会生成并自动同步以下文件：
 
 ```text
-/home/huangzizhe/Download/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_left.mcal
-/home/huangzizhe/Download/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_right.mcal
+/home/huangzizhe/Manus_L20_retarget-main/src/manus_ros2/calibration/Calibration_left.mcal
+/home/huangzizhe/Manus_L20_retarget-main/src/manus_ros2/calibration/Calibration_right.mcal
 ```
 
 确认文件已生成：
 
 ```bash
-ls -lh /home/huangzizhe/Download/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_*.mcal
+ls -lh /home/huangzizhe/Manus_L20_retarget-main/src/manus_ros2/calibration/Calibration_*.mcal
 ```
 
 这些 `.mcal` 文件会在启动 `manus_data_publisher` 时自动加载，不需要手动复制。
 
-注意：这一节只是在标定 MANUS 手套自己的 `.mcal`。它会影响 MANUS 输出数据的基础质量，但不会生成 L20 关节映射 YAML；L20 的四指、拇指和语义对指标定仍然使用后面的 `calibration_capture` 命令。
+### 3.2 MANUS-L20 标定
+
+在 `MANUS-L20 标定` 标签页选择左右手，按界面提示完成基础标定。该标签页只订阅 MANUS 数据，不会向 L20 发送运动命令，会生成四指弯曲、四指 yaw、拇指弯曲和拇指 segment IK 所需的 YAML。
+
+如需使用语义对指，在同一标签页继续完成指尖接触标定，生成：
+
+```text
+src/manus_l20_retarget/config/fingertip_contact_semantics_left.yaml
+src/manus_l20_retarget/config/fingertip_contact_semantics_right.yaml
+```
+
+完成后关闭 Qt，再继续数据检查和真机启动。
 
 ## 4. 标定后数据检查
 
 新开一个终端：
 
 ```bash
-cd /home/huangzizhe/Manus_L20_retarget
-source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
+cd /home/huangzizhe/Manus_L20_retarget-main
+source /home/huangzizhe/Manus_L20_retarget-main/install/setup.bash
 ros2 run manus_ros2 manus_data_publisher
 ```
 
 再开一个终端查看话题：
 
 ```bash
-cd /home/huangzizhe/Manus_L20_retarget
-source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
+cd /home/huangzizhe/Manus_L20_retarget-main
+source /home/huangzizhe/Manus_L20_retarget-main/install/setup.bash
 ros2 topic list | grep manus_glove
 ```
 
@@ -136,13 +173,13 @@ ros2 topic hz /manus_glove_1
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Manus_L20_retarget
-source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
+cd /home/huangzizhe/Manus_L20_retarget-main
+source /home/huangzizhe/Manus_L20_retarget-main/install/setup.bash
 
 ros2 run manus_ros2 manus_data_publisher --ros-args \
   -p load_calibration:=true \
-  -p left_calibration_path:=/home/huangzizhe/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_left.mcal \
-  -p right_calibration_path:=/home/huangzizhe/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_right.mcal
+  -p left_calibration_path:=/home/huangzizhe/Manus_L20_retarget-main/src/manus_ros2/calibration/Calibration_left.mcal \
+  -p right_calibration_path:=/home/huangzizhe/Manus_L20_retarget-main/src/manus_ros2/calibration/Calibration_right.mcal
 ```
 
 保持这个终端运行，再开另一个终端采集 retarget YAML。
@@ -168,8 +205,8 @@ ros2 run manus_ros2 manus_data_publisher --ros-args \
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Manus_L20_retarget
-source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
+cd /home/huangzizhe/Manus_L20_retarget-main
+source /home/huangzizhe/Manus_L20_retarget-main/install/setup.bash
 
 ros2 run manus_l20_retarget calibration_capture all \
   --hand right \
@@ -198,9 +235,9 @@ ros2 run manus_l20_retarget calibration_capture all \
 采集完成后确认 YAML 文件存在：
 
 ```bash
-ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/finger_*_ergonomics_*_calibration.yaml
-ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/thumb_*_flexion_ergonomics_mapping.yaml
-ls -lh /home/huangzizhe/Manus_L20_retarget/src/manus_l20_retarget/config/thumb_segment_frame_*.yaml
+ls -lh /home/huangzizhe/Manus_L20_retarget-main/src/manus_l20_retarget/config/finger_*_ergonomics_*_calibration.yaml
+ls -lh /home/huangzizhe/Manus_L20_retarget-main/src/manus_l20_retarget/config/thumb_*_flexion_ergonomics_mapping.yaml
+ls -lh /home/huangzizhe/Manus_L20_retarget-main/src/manus_l20_retarget/config/thumb_segment_frame_*.yaml
 ```
 
 ### 可选：指尖接触语义标定
@@ -238,7 +275,7 @@ fingertip_contact_semantics_left.yaml
 
 采集会保留已有的 `contact_command`，但不会自动得到真机接触姿态。先在原有连续遥操模式下手动验证每个接触姿态，将确认后的 20-slot 命令填入对应 `contact_command`；每一个数字都保留 slot 注释。随后把 YAML 的 `runtime.enabled` 改为 `true`。
 
-接触语义默认不启用。完成上述人工确认后，用户手动在启动命令中增加：
+Qt 指尖接触标定会保留已有接触姿态，但会将 `runtime.enabled` 设为 `false`。确认真机接触姿态后，将左右 YAML 中的 `runtime.enabled` 改为 `true`。省略 `full_takeover_progress`、`firm_contact_enter_activation`、`release_start_progress_delta` 的旧 YAML 仍可运行，程序会使用 `0.75`、`0.90`、`0.06` 的默认值；需要明确固化参数时可按语义文档中的示例补上。随后在启动命令中显式打开语义接触：
 
 ```bash
 enable_fingertip_contact_semantics:=true \
@@ -260,8 +297,8 @@ fingertip_contact_debug:=true
 启动双手遥操作：
 
 ```bash
-cd /home/huangzizhe/Manus_L20_retarget
-source /home/huangzizhe/Manus_L20_retarget/install/setup.bash
+cd /home/huangzizhe/Manus_L20_retarget-main
+source /home/huangzizhe/Manus_L20_retarget-main/install/setup.bash
 
 ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
   start_manus:=true \
@@ -270,8 +307,21 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
   is_touch:=false \
   right_input_topic:=/manus_glove_0 \
   left_input_topic:=/manus_glove_1 \
+  enable_fingertip_contact_semantics:=true \
+  fingertip_contact_debug:=true \
   thumb_ik_debug:=true
 ```
+
+语义接触的默认相位参数为：
+
+```text
+fingertip_contact_close_orientation_completion:=0.25
+fingertip_contact_close_flexion_start:=0.40
+fingertip_contact_release_flexion_open_completion:=0.65
+fingertip_contact_release_orientation_gamma:=2.5
+```
+
+其中 `0.65` 是当前 pick 算法迁移后的释放参数；不要继续使用旧文档中的 `0.18`。
 
 启动后观察终端日志，确认能看到：
 
@@ -280,7 +330,56 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
 - `/manus_glove_0`、`/manus_glove_1` 有数据。
 - LinkerHand driver 正常连接 `can0`、`can1`。
 
-## 7. 常用检查命令
+## 7. 双手触觉遥操作
+
+在左右 L20 都支持触觉读取、CAN 接口均正常且 MANUS 手套编号为右 `0`、左 `1` 时，在上面的双手命令中增加：
+
+```bash
+  enable_haptics:=true \
+  mock_tactile:=false \
+  right_haptic_glove_id:=0 \
+  left_haptic_glove_id:=1 \
+  haptic_poll_rate_hz:=30.0 \
+  haptic_read_mode:=auto \
+  haptic_normal_force_full_scale:=100.0
+```
+
+完整触觉启动命令：
+
+```bash
+cd /home/huangzizhe/Manus_L20_retarget-main
+source /opt/ros/humble/setup.bash
+source /home/huangzizhe/Manus_L20_retarget-main/install/setup.bash
+
+ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
+  start_manus:=true \
+  right_can:=can0 \
+  left_can:=can1 \
+  is_touch:=false \
+  right_input_topic:=/manus_glove_0 \
+  left_input_topic:=/manus_glove_1 \
+  enable_haptics:=true \
+  mock_tactile:=false \
+  right_haptic_glove_id:=0 \
+  left_haptic_glove_id:=1 \
+  haptic_poll_rate_hz:=30.0 \
+  haptic_read_mode:=auto \
+  haptic_normal_force_full_scale:=100.0 \
+  enable_fingertip_contact_semantics:=false \
+  fingertip_contact_debug:=true \
+  thumb_ik_debug:=true
+```
+
+触觉链路为：
+
+```text
+右 L20 can0 -> /manus_l20_haptics/right/force -> /manus_glove_0/vibration_cmd
+左 L20 can1 -> /manus_l20_haptics/left/force  -> /manus_glove_1/vibration_cmd
+```
+
+没有触觉硬件时可临时使用 `mock_tactile:=true` 做软件链路检查；它不会产生真实力反馈。
+
+## 8. 常用检查命令
 
 查看 MANUS 数据：
 
@@ -313,25 +412,15 @@ ros2 node list
 ros2 topic list | grep -E "manus|cb_"
 ```
 
-## 8. 常见问题
+## 9. 常见问题
 
-### 标定 GUI 启动时报 `libManusSDK_Integrated.so` 相关错误
+### 找不到 GLFW/glfw3.h
 
-新 GUI 目录包优先使用 `deploy/manus-calibration/lib/libManusSDK_Integrated.so`。
-如果该文件还是约 134 字节的 Git LFS 指针，`run.sh` 会自动回退到当前工作区
-已有的 `src/ManusSDK/lib/libManusSDK_Integrated.so`。先检查两份文件：
+安装 GUI 编译依赖：
 
 ```bash
-cd /home/huangzizhe/Download/Manus_L20_retarget
-ls -lh deploy/manus-calibration/lib/libManusSDK_Integrated.so
-ls -lh src/ManusSDK/lib/libManusSDK_Integrated.so
-```
-
-如果工作区的 SDK 也不存在，再拉取目录包的 LFS 文件：
-
-```bash
-git lfs install
-git lfs pull -I deploy/manus-calibration/lib/libManusSDK_Integrated.so
+sudo apt-get update
+sudo apt-get install -y build-essential libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev
 ```
 
 ### 标定 GUI 可以打开，但显示没有手套
@@ -377,7 +466,9 @@ lsusb
 
 如果设备名不是 `can0` / `can1`，按实际名称修改 `right_can` 和 `left_can`。
 
-## 9. 停止流程
+如果 launch 日志出现 `Could not access SocketCAN device can1` 或 `OSError: [Errno 19] No such device`，表示系统中根本没有 `can1`，左手驱动和左手触觉节点都会退出。检查第二个 USB-CAN 转接器、线缆和驱动，确认 `ip -br link show type can` 同时列出 `can0`、`can1` 后，再启动双手命令。
+
+## 10. 停止流程
 
 1. 先松开手套动作，保持机械手在安全姿态。
 2. 在遥操作 launch 终端按 `Ctrl+C`。

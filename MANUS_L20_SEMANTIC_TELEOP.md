@@ -1,27 +1,17 @@
 # MANUS L20 语义对指遥操作说明
 
-本文档只记录语义对指版本的标定和启动流程。普通四指弯曲、四指 yaw、拇指弯曲、拇指 Roll/Yaw IK 的基础标定仍参考 `MANUS_L20_TELEOP_SOP.md`。
+本文档记录语义对指版本从 Qt 标定到双手启动的完整流程。普通四指弯曲、四指 yaw、拇指弯曲、拇指 Roll/Yaw IK 的基础说明仍参考 `MANUS_L20_TELEOP_SOP.md`。
 
-开始语义对指标定前，先用新的 MANUS 标定 GUI 更新手套 `.mcal`：
-
-```bash
-source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Download/Manus_L20_retarget
-./deploy/manus-calibration/run.sh
-```
-
-这一步只更新 `src/manus_ros2/calibration/Calibration_left.mcal` 和 `Calibration_right.mcal`。下面的对指标定仍然使用 ROS 命令生成 L20 语义 YAML。
+本文统一使用 ASCII 路径 `/home/huangzizhe/Manus_L20_retarget-main`。它指向当前工程
+`/home/huangzizhe/下载/Manus_L20_retarget-main`，用于避免 ROS 2 接口生成器处理中文路径时失败。
 
 ## 1. 功能范围
 
-语义对指识别四类人手动作：
+语义对指当前只识别一类人手动作：
 
 - 拇指指尖接触食指指尖。
-- 拇指指尖接触中指指尖。
-- 拇指指尖接触无名指指尖。
-- 拇指指尖接触小指指尖。
 
-数据来源是 `ManusGlove.raw_nodes`。程序每帧取 `Thumb.TIP` 和对应 `Finger.TIP`，计算：
+数据来源是 `ManusGlove.raw_nodes`。程序每帧取 `Thumb.TIP` 和 `Index.TIP`，计算：
 
 ```text
 distance_ratio = ||Thumb.TIP - Finger.TIP|| / ||Index.MCP - Pinky.MCP||
@@ -43,13 +33,10 @@ MANUS ergonomics 四指/拇指弯曲
 拇指 Root/Tip: slot 0, 15
 当前对指手指 Root/Tip:
   食指: slot 1, 16
-  中指: slot 2, 17
-  无名指: slot 3, 18
-  小指: slot 4, 19
 拇指 Roll/Yaw: slot 5, 10
 ```
 
-其他手指和四指 yaw 继续走正常遥操作。
+中指、无名指、小指以及四指 yaw 继续走正常遥操作，不触发语义接管。
 
 语义对指现在带有“分相位接管”：
 
@@ -59,44 +46,61 @@ MANUS ergonomics 四指/拇指弯曲
   后接管 slot 0/当前手指root/15/当前手指tip，让弯曲再夹住。
 
 对指夹住 -> 张开:
-  先把 slot 0/当前手指root/15/当前手指tip 拉回 open，避免松开时反夹一下。
+  达到稳定接触后，root/tip 按当前距离连续回到 open，避免松开时反夹一下。
   slot 5/10 先慢后快退回正常拇指 IK，减少横向扫到物体。
 ```
 
-这个提前量是相对于当前语义动作的，例如识别到食指对指时，slot 5/10 只提前走食指对指 YAML 里的 Roll/Yaw；不会提前转到小拇指对指姿态。
+这个提前量是相对于当前语义动作的；当前只保留食指对指，所以 slot 5/10 只会提前走食指对指 YAML 里的 Roll/Yaw。
 
-## 2. 代码结构
+接触状态会先确认稳定接触，再进入释放模式。释放过程中距离噪声不会让接管比例反向增加，避免 L20 手指在松开时抖动或重新夹紧。
 
-语义对指相关逻辑集中在 `contact_semantics.py`：
+## 2. Qt 标定入口
 
-```text
-thumb_fingertip_distance_ratios()
-  从 raw skeleton 计算 Thumb.TIP 到四指 TIP 的掌宽归一化距离。
+先完成通用遥操作 SOP 中的环境准备和 CAN 检查。使用当前工作区构建：
 
-FingertipContactStateMachine
-  根据距离比例选择 index/middle/ring/pinky 的当前对指 pair，并输出 activation。
-  activation 带坚定接触保持，避免 raw skeleton 小抖动造成反复张开/闭合。
-
-FingertipContactCommandBlender
-  根据 activation 的增减方向做分相位接管：
-  - 闭合时 slot 5/10 先走。
-  - 松开时 root/tip 先回 open。
-
-blend_fingertip_contact_command()
-  只混合当前 pair 的 override_slots，不改其他手指。
+```bash
+conda deactivate
+cd /home/huangzizhe/Manus_L20_retarget-main
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-up-to bringup \
+  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
+source /home/huangzizhe/Manus_L20_retarget-main/install/setup.bash
 ```
 
-`manus_l20_retarget_node.py` 只负责调度：
+如果之前构建失败过，第一次恢复构建时增加 `--cmake-clean-cache`：
 
-```text
-基础遥操命令
--> thumb_fingertip_distance_ratios()
--> FingertipContactStateMachine.update()
--> FingertipContactCommandBlender.blend()
--> 发布 L20 20-slot
+```bash
+colcon build --symlink-install --packages-up-to bringup --cmake-clean-cache \
+  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
 ```
 
-这样主节点保持一条主链路，语义模块自己负责“识别 + 状态机 + 接管权重”。
+确认 ROS 没有落到旧工作区：
+
+```bash
+ros2 pkg prefix bringup
+ros2 pkg prefix manus_l20_retarget
+```
+
+两个输出都应以 `/home/huangzizhe/Manus_L20_retarget-main/install/` 开头。
+
+启动 Qt 标定工作台：
+
+```bash
+conda deactivate
+cd /home/huangzizhe/Manus_L20_retarget-main
+./tools/run_calibration_ui.sh
+```
+
+在 Qt 的 `MANUS 手套标定` 标签页完成左右手套 `.mcal` 标定；再在 `MANUS-L20 标定` 标签页完成基础 YAML 标定。该界面只订阅 MANUS 数据，不会向 L20 发送运动命令。
+
+语义对指还要在 `MANUS-L20 标定` 标签页完成指尖接触标定，依次采集：自然张开、拇指-食指、拇指-中指、拇指-无名指、拇指-小指。标定结果写入：
+
+```text
+/home/huangzizhe/Manus_L20_retarget-main/src/manus_l20_retarget/config/fingertip_contact_semantics_left.yaml
+/home/huangzizhe/Manus_L20_retarget-main/src/manus_l20_retarget/config/fingertip_contact_semantics_right.yaml
+```
+
+Qt 接触标定完成后会将 `runtime.enabled` 保持为 `false`。人工确认每个 L20 接触姿态后，再将左右 YAML 的 `runtime.enabled` 改为 `true`。
 
 ## 3. 启动 MANUS 数据发布器
 
@@ -104,13 +108,13 @@ blend_fingertip_contact_command()
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Download/Manus_L20_retarget
+cd /home/huangzizhe/Manus_L20_retarget-main
 source install/setup.bash
 
 ros2 run manus_ros2 manus_data_publisher --ros-args \
   -p load_calibration:=true \
-  -p left_calibration_path:=/home/huangzizhe/Download/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_left.mcal \
-  -p right_calibration_path:=/home/huangzizhe/Download/Manus_L20_retarget/src/manus_ros2/calibration/Calibration_right.mcal
+  -p left_calibration_path:=/home/huangzizhe/Manus_L20_retarget-main/src/manus_ros2/calibration/Calibration_left.mcal \
+  -p right_calibration_path:=/home/huangzizhe/Manus_L20_retarget-main/src/manus_ros2/calibration/Calibration_right.mcal
 ```
 
 确认话题有数据：
@@ -128,7 +132,7 @@ ros2 topic hz /manus_glove_1
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Download/Manus_L20_retarget
+cd /home/huangzizhe/Manus_L20_retarget-main
 source install/setup.bash
 
 ros2 run manus_l20_retarget calibration_capture fingertip-contact \
@@ -141,7 +145,7 @@ ros2 run manus_l20_retarget calibration_capture fingertip-contact \
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Download/Manus_L20_retarget
+cd /home/huangzizhe/Manus_L20_retarget-main
 source install/setup.bash
 
 ros2 run manus_l20_retarget calibration_capture fingertip-contact \
@@ -152,13 +156,10 @@ ros2 run manus_l20_retarget calibration_capture fingertip-contact \
 
 如果左手手套实际发布在 `/manus_glove_0`，把左手命令里的 `/manus_glove_1` 改成 `/manus_glove_0`。
 
-工具会依次采 5 个姿势：
+工具会依次采 2 个姿势：
 
 - `natural_open`: 自然张开，拇指远离四指。
 - `thumb_index_tip_touch`: 拇指指尖触碰食指指尖。
-- `thumb_middle_tip_touch`: 拇指指尖触碰中指指尖。
-- `thumb_ring_tip_touch`: 拇指指尖触碰无名指指尖。
-- `thumb_pinky_tip_touch`: 拇指指尖触碰小指指尖。
 
 生成文件：
 
@@ -177,36 +178,39 @@ src/manus_l20_retarget/config/fingertip_contact_semantics_left.yaml
 当前对指 Root/Tip 参数按下面统一填写：
 
 ```text
-拇指 Root slot 0 = 174
-四指 Root slot 1-4 = 78
+拇指 Root slot 0 = 133
+食指 Root slot 1 = 79
 拇指 Tip slot 15 = 160
-四指 Tip slot 16-19 = 161
+食指 Tip slot 16 = 152
 ```
 
-四组对应 slot：
+当前唯一语义对指对应 slot：
 
 ```text
-thumb-index:  slot 0/1/15/16  = 174/78/160/161
-thumb-middle: slot 0/2/15/17  = 174/78/160/161
-thumb-ring:   slot 0/3/15/18  = 174/78/160/161
-thumb-pinky:  slot 0/4/15/19  = 174/78/160/161
+thumb-index: slot 0/1/15/16 = 133/79/160/152
 ```
 
-拇指 Roll/Yaw 仍使用每组 `contact_command` 原有值：
+拇指 Roll/Yaw 使用食指对指 `contact_command` 里的值：
 
 ```text
 slot 5  Thumb Roll
 slot 10 Thumb Yaw
 ```
 
-启用语义对指前，确认：
+启用语义对指前，确认左右 YAML 的 `runtime.enabled` 都为 `true`。Qt 重新采集指尖接触后会写回 `false`，这是为了让新姿态先经过真机确认。
+
+新算法参数可以显式写入左右 YAML：
 
 ```yaml
 runtime:
   enabled: true
+  takeover_start_progress: 0.35
+  full_takeover_progress: 0.75
+  firm_contact_enter_activation: 0.90
+  release_start_progress_delta: 0.06
 ```
 
-注意必须是 `true`，不是 `ture`。本语义调试分支里 YAML 和 launch 默认都已打开；如果 YAML 写错，launch 参数打开了也不会生效。
+`full_takeover_progress` 让闭合接管在接触前稳定饱和；`firm_contact_enter_activation` 用于确认已经形成稳定接触；`release_start_progress_delta` 抑制距离噪声造成的误释放。旧 YAML 省略这三项时，程序分别采用相同的默认值 `0.75`、`0.90`、`0.06`。`enabled` 必须是 `true`，不是 `ture`；如果 YAML 写错，launch 参数打开了也不会生效。
 
 ## 6. 双手语义遥操作启动命令
 
@@ -214,7 +218,7 @@ runtime:
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Download/Manus_L20_retarget
+cd /home/huangzizhe/Manus_L20_retarget-main
 source install/setup.bash
 
 ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
@@ -224,27 +228,7 @@ ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
   is_touch:=false \
   right_input_topic:=/manus_glove_0 \
   left_input_topic:=/manus_glove_1 \
-  fingertip_contact_debug:=true \
-  thumb_ik_debug:=true
-```
-
-开启 MANUS 触觉手套振动反馈时，用这一条：
-
-```bash
-source /opt/ros/humble/setup.bash
-cd /home/huangzizhe/Download/Manus_L20_retarget
-source install/setup.bash
-
-ros2 launch bringup manus_l20_linkerhand_g20.launch.py \
-  start_manus:=true \
-  right_can:=can0 \
-  left_can:=can1 \
-  is_touch:=false \
-  right_input_topic:=/manus_glove_0 \
-  left_input_topic:=/manus_glove_1 \
-  enable_haptics:=true \
-  right_haptic_glove_id:=0 \
-  left_haptic_glove_id:=1 \
+  enable_fingertip_contact_semantics:=true \
   fingertip_contact_debug:=true \
   thumb_ik_debug:=true
 ```
@@ -268,24 +252,8 @@ fingertip_contact_release_orientation_gamma:=2.5
 
 - `close_orientation_completion`: 从张开到夹住的前多少接近行程内，Roll/Yaw 就完成接管。数值越小，Roll/Yaw 越早到位。
 - `close_flexion_start`: 接近行程超过多少以后，root/tip 才开始按语义夹住。数值越大，越晚闭合。
-- `release_flexion_open_completion`: 从夹住到松开的前多少释放行程内，root/tip 完成回 open。数值越小，弯曲越快松开；当前默认 `0.65`，是“先打开弯曲，但不是硬弹开”的缓释手感。
+- `release_flexion_open_completion`: 从夹住到松开的前多少释放行程内，root/tip 完成回 open。当前默认值为 `0.65`。
 - `release_orientation_gamma`: 松开时 Roll/Yaw 的回退曲线。数值越大，前段越慢、后段越快。
-
-YAML `runtime` 里还有两个用于“夹住更坚定”的参数：
-
-```text
-full_takeover_progress: 0.75
-firm_contact_enter_activation: 0.9
-release_start_progress_delta: 0.06
-```
-
-含义：
-
-- `full_takeover_progress`: 从自然张开到接触标定值的 75% 行程时，语义接管就饱和到 1.0，不要求人手必须精确压到标定接触距离。
-- `firm_contact_enter_activation`: activation 达到 0.9 后，认为已经进入坚定接触。
-- `release_start_progress_delta`: 进入坚定接触后，指尖距离需要比最近接触距离增大多少标定行程，才认为你真的在松开。默认 `0.06` 用来过滤慢闭合时的 raw skeleton 小抖动，不会把方向写死。
-
-进入坚定接触后，松开不再等待某个固定 release activation 阈值；当 `Thumb.TIP -> Finger.TIP` 距离出现明确打开趋势后，程序进入 release mode，并用当前距离在“接触标定距离”和“自然张开距离”之间连续插值。这样人手一打开，L20 的语义接管量就开始下降，但慢速闭合中的单帧噪声不会误触发打开。
 
 如果后续要临时覆盖默认值，也可以在启动命令后加新的数值，例如：
 
@@ -302,6 +270,8 @@ fingertip_contact_release_orientation_gamma:=2.5
 driver_speed:=80,80,80,80,80
 ```
 
+如需在语义遥操期间同时开启真实触觉，在上述 launch 命令加入 `enable_haptics:=true`、`mock_tactile:=false`、左右手 `haptic_glove_id` 等参数。完整双手触觉命令、触觉话题和 mock 测试说明见 `MANUS_L20_TELEOP_SOP.md` 的“7. 双手触觉遥操作”。
+
 ## 7. 调试观察
 
 打开 `fingertip_contact_debug:=true` 后，日志会显示语义接触事件：
@@ -317,6 +287,12 @@ fingertip_contact released:index activation=...
 - 检查对应 YAML 的 `runtime.enabled` 是否为 `true`。
 - 检查 MANUS raw skeleton 是否完整输出。
 - 检查左右手话题是否接反。
+
+如果释放时手指重新夹紧或出现抖动：
+
+- 确认代码和安装空间来自 `/home/huangzizhe/Manus_L20_retarget-main`。
+- 确认 `full_takeover_progress`、`firm_contact_enter_activation` 和 `release_start_progress_delta` 使用左右 YAML 中的当前值。
+- 不要把 `release_flexion_open_completion` 改回旧值 `0.18`。
 
 如果识别到错误手指：
 

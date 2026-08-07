@@ -7,12 +7,12 @@ tip_ergonomics_keys:
 - ThumbDIPStretch
 command:
   thumb_natural_open_command:
-  - 255    # 0  Thumb Base / 拇指根部弯曲
+  - 160    # 0  Thumb Base / 拇指根部弯曲
   - 255    # 1  Index Finger Base / 食指根部弯曲
   - 255    # 2  Middle Finger Base / 中指根部弯曲
   - 255    # 3  Ring Finger Base / 无名指根部弯曲
   - 255    # 4  Pinky Finger Base / 小指根部弯曲
-  - 150    # 5  Thumb Roll / 拇指 roll
+  - 100    # 5  Thumb Roll / 拇指 roll
   - 163    # 6  Index Finger Yaw / 食指侧摆
   - 129    # 7  Middle Finger Yaw / 中指侧摆
   - 86     # 8  Ring Finger Yaw / 无名指侧摆
@@ -28,12 +28,12 @@ command:
   - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
   - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
   thumb_pinky_root_touch_command:
-  - 60     # 0  Thumb Base / 拇指根部弯曲
+  - 80     # 0  Thumb Base / 拇指根部弯曲
   - 255    # 1  Index Finger Base / 食指根部弯曲
   - 255    # 2  Middle Finger Base / 中指根部弯曲
   - 255    # 3  Ring Finger Base / 无名指根部弯曲
   - 255    # 4  Pinky Finger Base / 小指根部弯曲
-  - 0      # 5  Thumb Roll / 拇指 roll
+  - 20     # 5  Thumb Roll / 拇指 roll
   - 163    # 6  Index Finger Yaw / 食指侧摆
   - 129    # 7  Middle Finger Yaw / 中指侧摆
   - 86     # 8  Ring Finger Yaw / 无名指侧摆
@@ -43,57 +43,57 @@ command:
   - 255    # 12 Reserved / 保留位
   - 255    # 13 Reserved / 保留位
   - 255    # 14 Reserved / 保留位
-  - 140    # 15 Thumb Tip / 拇指指尖弯曲
+  - 120    # 15 Thumb Tip / 拇指指尖弯曲
   - 255    # 16 Index Finger Tip / 食指指尖弯曲
   - 255    # 17 Middle Finger Tip / 中指指尖弯曲
   - 255    # 18 Ring Finger Tip / 无名指指尖弯曲
   - 255    # 19 Pinky Finger Tip / 小指指尖弯曲
 samples:
   thumb_natural_open:
-    root_value: 49.99755
-    tip_value: -17.99481
+    root_value: 38.108085
+    tip_value: -5.195109
     ergonomics:
-      IndexDIPStretch: -11.305551
-      IndexMCPStretch: -19.694791
-      IndexPIPStretch: 5.861668
-      IndexSpread: 6.630844
-      MiddleDIPStretch: -16.46636
-      MiddleMCPStretch: -12.636009
-      MiddlePIPStretch: 7.381479
-      MiddleSpread: -6.469546
-      PinkyDIPStretch: -33.339895
-      PinkyMCPStretch: 31.060438
-      PinkyPIPStretch: -0.585671
-      PinkySpread: -44.011039
-      RingDIPStretch: -10.198413
-      RingMCPStretch: -0.831169
-      RingPIPStretch: 2.706591
-      RingSpread: -15.420977
-      ThumbDIPStretch: -25.407
-      ThumbMCPSpread: -7.799734
-      ThumbMCPStretch: 49.99755
-      ThumbPIPStretch: 7.41219
+      IndexDIPStretch: 4.111864
+      IndexMCPStretch: 11.510123
+      IndexPIPStretch: 0.131947
+      IndexSpread: -4.210747
+      MiddleDIPStretch: -5.721475
+      MiddleMCPStretch: 13.764356
+      MiddlePIPStretch: -0.120932
+      MiddleSpread: -12.664085
+      PinkyDIPStretch: -9.98827
+      PinkyMCPStretch: 18.906757
+      PinkyPIPStretch: -0.487307
+      PinkySpread: -27.346996
+      RingDIPStretch: -8.606618
+      RingMCPStretch: 9.662271
+      RingPIPStretch: -0.187013
+      RingSpread: -17.783701
+      ThumbDIPStretch: -5.171092
+      ThumbMCPSpread: 6.704895
+      ThumbMCPStretch: 38.108085
+      ThumbPIPStretch: -0.024017
   thumb_pinky_root_touch:
-    root_value: 8.714113
-    tip_value: 84.622435
+    root_value: 17.856112
+    tip_value: 112.22152
     ergonomics:
-      IndexDIPStretch: 0.104506
-      IndexMCPStretch: 39.977665
-      IndexPIPStretch: 1.033585
-      IndexSpread: 2.025186
-      MiddleDIPStretch: -8.84186
-      MiddleMCPStretch: 15.081592
-      MiddlePIPStretch: -0.012472
-      MiddleSpread: -13.502219
-      PinkyDIPStretch: -38.157454
-      PinkyMCPStretch: 34.721835
-      PinkyPIPStretch: -0.976868
-      PinkySpread: -21.652748
-      RingDIPStretch: -9.213907
-      RingMCPStretch: 13.890906
-      RingPIPStretch: 2.169084
-      RingSpread: -13.098287
-      ThumbDIPStretch: 31.8838
-      ThumbMCPSpread: 33.707014
-      ThumbMCPStretch: 8.714113
-      ThumbPIPStretch: 52.738635
+      IndexDIPStretch: 19.103403
+      IndexMCPStretch: 54.062585
+      IndexPIPStretch: 0.186523
+      IndexSpread: 9.176462
+      MiddleDIPStretch: -0.160134
+      MiddleMCPStretch: 30.855264
+      MiddlePIPStretch: 0.006754
+      MiddleSpread: -11.626943
+      PinkyDIPStretch: -15.910678
+      PinkyMCPStretch: 50.171383
+      PinkyPIPStretch: -0.772807
+      PinkySpread: -3.717774
+      RingDIPStretch: -4.005872
+      RingMCPStretch: 33.518348
+      RingPIPStretch: -0.007033
+      RingSpread: -17.147599
+      ThumbDIPStretch: 67.021152
+      ThumbMCPSpread: 16.53322
+      ThumbMCPStretch: 17.856112
+      ThumbPIPStretch: 45.200368
