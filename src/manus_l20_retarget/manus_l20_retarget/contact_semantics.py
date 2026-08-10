@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Any, Callable, Mapping
 
@@ -11,10 +11,21 @@ from .mapping import clamp_u8
 
 FINGERTIP_CONTACT_FINGERS = ("index",)
 FINGERTIP_CONTACT_SLOTS = {
-    # Contact takeover is local to the thumb and the selected finger.  The
-    # other fingers (including their yaw slots) continue through teleoperation.
+    # Contact takeover is local to the thumb and selected finger. Other fingers,
+    # including their yaw slots, continue through normal teleoperation.
     "index": (0, 1, 5, 10, 15, 16),
 }
+
+CONTACT_STATE_IDLE = "idle"
+CONTACT_STATE_ACTIVE = "active"
+CONTACT_STATE_RELEASE_INTENT = "release_intent"
+CONTACT_STATE_RECLOSE_INTENT = "reclose_intent"
+
+# Backward-compatible names used by older tests/tools.
+CONTACT_STATE_APPROACH = CONTACT_STATE_ACTIVE
+CONTACT_STATE_HOLD = CONTACT_STATE_ACTIVE
+CONTACT_STATE_RELEASE = CONTACT_STATE_RELEASE_INTENT
+CONTACT_STATE_RECLOSE = CONTACT_STATE_RECLOSE_INTENT
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +52,19 @@ class FingertipContactConfig:
     reclose_start_progress_delta: float
     activation_rise_sec: float
     activation_release_sec: float
+    distance_filter_alpha: float = 1.0
+    command_slew_per_cycle: int = 255
+    phase_switch_sec: float = 0.08
+
+
+@dataclass(frozen=True, slots=True)
+class FingertipContactFeature:
+    finger: str
+    distance_raw: float
+    distance_filtered: float
+    progress: float
+    takeover_progress: float
+    velocity: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +73,15 @@ class FingertipContactDecision:
     activation: float
     ratios: dict[str, float]
     event: str | None
+    state: str = CONTACT_STATE_IDLE
+    phase: float = 0.0
+    phase_target: float = 0.0
+    features: dict[str, FingertipContactFeature] = field(default_factory=dict)
+    slot_activations: dict[int, float] = field(default_factory=dict)
+    slot_targets: dict[int, int] = field(default_factory=dict)
+    base_command_slots: dict[int, int] = field(default_factory=dict)
+    desired_command_slots: dict[int, int] = field(default_factory=dict)
+    command_slots: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +90,6 @@ class FingertipContactPhaseConfig:
     close_flexion_start: float = 0.40
     release_flexion_open_completion: float = 0.65
     release_orientation_gamma: float = 2.5
-    direction_change_deadband: float = 0.04
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -73,17 +105,12 @@ class FingertipContactPhaseConfig:
         object.__setattr__(
             self,
             "release_flexion_open_completion",
-            _unit_interval_parameter(self.release_flexion_open_completion, 0.18, allow_one=True),
+            _unit_interval_parameter(self.release_flexion_open_completion, 0.65, allow_one=True),
         )
         object.__setattr__(
             self,
             "release_orientation_gamma",
             max(0.05, _finite_float(self.release_orientation_gamma, 2.5)),
-        )
-        object.__setattr__(
-            self,
-            "direction_change_deadband",
-            _unit_interval_parameter(self.direction_change_deadband, 0.04, allow_one=True),
         )
 
 
@@ -179,117 +206,232 @@ def parse_fingertip_contact_config(data: Any) -> FingertipContactConfig:
             allow_one=True,
         ),
         reclose_start_progress_delta=_unit_interval_parameter(
-            runtime.get("reclose_start_progress_delta", 0.005),
-            0.005,
+            runtime.get("reclose_start_progress_delta", 0.02),
+            0.02,
             allow_one=True,
         ),
         activation_rise_sec=_nonnegative_float(
-            runtime.get("activation_rise_sec", 0.04),
+            runtime.get("activation_rise_sec", 0.03),
             "runtime.activation_rise_sec",
         ),
         activation_release_sec=_nonnegative_float(
-            runtime.get("activation_release_sec", 0.06),
+            runtime.get("activation_release_sec", 0.04),
             "runtime.activation_release_sec",
+        ),
+        distance_filter_alpha=_unit_interval_parameter(
+            runtime.get("distance_filter_alpha", 1.0),
+            1.0,
+            allow_one=True,
+        ),
+        command_slew_per_cycle=_nonnegative_int(
+            runtime.get("command_slew_per_cycle", 255),
+            "runtime.command_slew_per_cycle",
+        ),
+        phase_switch_sec=_nonnegative_float(
+            runtime.get("phase_switch_sec", 0.08),
+            "runtime.phase_switch_sec",
         ),
     )
 
 
-class FingertipContactStateMachine:
-    """Latch one contact pair while its distance continuously controls takeover."""
+class FingertipContactFeatureExtractor:
+    """Convert raw fingertip distance into progress and velocity."""
 
     def __init__(self, config: FingertipContactConfig) -> None:
         self._config = config
         self.reset()
 
     def reset(self) -> None:
+        self._last_filtered: dict[str, float] = {}
+        self._last_time: float | None = None
+
+    def update(self, ratios: Mapping[str, float], now_sec: float) -> dict[str, FingertipContactFeature]:
+        now = float(now_sec)
+        elapsed = 0.0 if self._last_time is None else max(1e-6, min(0.10, now - self._last_time))
+        alpha = self._config.distance_filter_alpha
+        features: dict[str, FingertipContactFeature] = {}
+        for finger, value in ratios.items():
+            if finger not in self._config.profiles:
+                continue
+            raw = float(value)
+            if not math.isfinite(raw) or raw < 0.0:
+                continue
+            previous = self._last_filtered.get(finger)
+            filtered = raw if previous is None else alpha * raw + (1.0 - alpha) * previous
+            velocity = 0.0 if previous is None or elapsed <= 0.0 else (filtered - previous) / elapsed
+            profile = self._config.profiles[finger]
+            progress = _continuous_contact_progress(profile, filtered)
+            features[finger] = FingertipContactFeature(
+                finger=finger,
+                distance_raw=raw,
+                distance_filtered=filtered,
+                progress=progress,
+                takeover_progress=_takeover_contact_progress(self._config, progress),
+                velocity=velocity,
+            )
+            self._last_filtered[finger] = filtered
+        self._last_time = now
+        return features
+
+
+class ContactIntentStateMachine:
+    """Decide contact intent and phase; it does not plan L20 slot values."""
+
+    def __init__(self, config: FingertipContactConfig) -> None:
+        self._config = config
+        self.reset()
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    def reset(self) -> None:
+        self._state = CONTACT_STATE_IDLE
         self._active_pair: str | None = None
-        self._blend_pair: str | None = None
         self._candidate_pair: str | None = None
         self._candidate_since: float | None = None
         self._release_since: float | None = None
         self._activation = 0.0
-        self._firm_contact = False
-        self._release_mode = False
-        self._reclose_mode = False
-        self._last_active_pair: str | None = None
-        self._last_active_distance: float | None = None
-        self._closest_firm_distance: float | None = None
-        self._farthest_release_distance: float | None = None
+        self._phase = 0.0
+        self._phase_target = 0.0
+        self._peak_progress = 0.0
+        self._trough_progress = 1.0
+        self._reclose_complete_progress = 1.0
         self._last_time: float | None = None
 
-    def update(self, ratios: Mapping[str, float], now_sec: float) -> FingertipContactDecision:
+    def update(
+        self,
+        features: Mapping[str, FingertipContactFeature],
+        now_sec: float,
+    ) -> FingertipContactDecision:
         now = float(now_sec)
-        if not math.isfinite(now):
-            raise ValueError("fingertip contact time must be finite")
-        valid_ratios = {
-            finger: float(value)
-            for finger, value in ratios.items()
-            if finger in self._config.profiles and math.isfinite(float(value)) and float(value) >= 0.0
-        }
-        event = self._update_latch(valid_ratios, now)
-        self._update_activation(valid_ratios, now)
+        elapsed = 0.0 if self._last_time is None else max(0.0, min(0.10, now - self._last_time))
+        self._last_time = now
+        event, pair, progress = self._update_intent(features, now)
+        self._update_activation(progress, elapsed)
+        self._update_phase(elapsed)
+        if self._active_pair is None and self._activation <= 1e-6:
+            self._state = CONTACT_STATE_IDLE
+            self._phase = 0.0
+            self._phase_target = 0.0
+        ratios = {finger: feature.distance_raw for finger, feature in features.items()}
         return FingertipContactDecision(
-            pair=self._blend_pair,
+            pair=pair,
             activation=self._activation,
-            ratios=valid_ratios,
+            ratios=ratios,
             event=event,
+            state=self._state,
+            phase=self._phase,
+            phase_target=self._phase_target,
+            features=dict(features),
         )
 
-    def _update_latch(self, ratios: Mapping[str, float], now: float) -> str | None:
-        if self._active_pair is not None:
-            profile = self._config.profiles[self._active_pair]
-            value = ratios.get(self._active_pair)
-            if value is not None:
-                keep_target = (
-                    self._release_target(profile, value)
-                    if self._firm_contact and self._release_mode
-                    else self._takeover_target(profile, value)
+    def _update_intent(
+        self,
+        features: Mapping[str, FingertipContactFeature],
+        now: float,
+    ) -> tuple[str | None, str | None, float]:
+        if self._active_pair is None:
+            return self._update_idle(features, now)
+        return self._update_active(features, now)
+
+    def _update_idle(
+        self,
+        features: Mapping[str, FingertipContactFeature],
+        now: float,
+    ) -> tuple[str | None, str | None, float]:
+        candidate = self._candidate(features)
+        if candidate is None:
+            self._candidate_pair = None
+            self._candidate_since = None
+            return None, None, 0.0
+        if candidate != self._candidate_pair:
+            self._candidate_pair = candidate
+            self._candidate_since = now
+            return None, None, 0.0
+        if self._candidate_since is None:
+            self._candidate_since = now
+            return None, None, 0.0
+        if now - self._candidate_since < self._config.min_hold_sec:
+            return None, None, 0.0
+
+        feature = features[candidate]
+        self._active_pair = candidate
+        self._state = CONTACT_STATE_ACTIVE
+        self._phase_target = 0.0
+        self._peak_progress = feature.progress
+        self._trough_progress = feature.progress
+        self._candidate_pair = None
+        self._candidate_since = None
+        return f"activated:{candidate}", candidate, feature.progress
+
+    def _update_active(
+        self,
+        features: Mapping[str, FingertipContactFeature],
+        now: float,
+    ) -> tuple[str | None, str | None, float]:
+        assert self._active_pair is not None
+        feature = features.get(self._active_pair)
+        if feature is None:
+            return None, self._active_pair, 0.0
+
+        progress = feature.progress
+        event: str | None = None
+        if self._state == CONTACT_STATE_ACTIVE:
+            self._peak_progress = max(self._peak_progress, progress)
+            self._trough_progress = progress
+            if self._release_intent(feature):
+                self._state = CONTACT_STATE_RELEASE_INTENT
+                self._phase_target = _release_phase_target(progress)
+                self._trough_progress = progress
+                self._reclose_complete_progress = max(
+                    self._config.full_takeover_progress,
+                    min(1.0, self._peak_progress - self._config.release_start_progress_delta),
                 )
-                if keep_target > 0.0:
-                    self._release_since = None
-                    return None
+        elif self._state == CONTACT_STATE_RELEASE_INTENT:
+            self._trough_progress = min(self._trough_progress, progress)
+            if self._reclose_intent(feature):
+                self._state = CONTACT_STATE_RECLOSE_INTENT
+                self._phase_target = _release_phase_target(progress)
+            else:
+                self._phase_target = _release_phase_target(progress)
+        elif self._state == CONTACT_STATE_RECLOSE_INTENT:
+            if self._release_intent(feature):
+                self._state = CONTACT_STATE_RELEASE_INTENT
+                self._phase_target = _release_phase_target(progress)
+                self._trough_progress = progress
+            elif progress >= self._reclose_complete_progress:
+                self._state = CONTACT_STATE_ACTIVE
+                self._phase_target = 0.0
+                self._peak_progress = progress
+                self._trough_progress = progress
+            else:
+                self._phase_target = _release_phase_target(progress)
+
+        if progress <= 0.0:
             if self._release_since is None:
                 self._release_since = now
-                return None
-            if now - self._release_since >= self._config.release_hold_sec:
+            elif now - self._release_since >= self._config.release_hold_sec:
                 released = self._active_pair
                 self._active_pair = None
                 self._candidate_pair = None
                 self._candidate_since = None
                 self._release_since = None
-                return f"released:{released}"
-            return None
+                self._peak_progress = 0.0
+                self._trough_progress = 1.0
+                self._phase_target = 0.0
+                return f"released:{released}", None, 0.0
+        else:
+            self._release_since = None
 
-        if self._blend_pair is not None and self._activation > 1e-6:
-            return None
+        return event, self._active_pair, progress
 
-        candidate = self._candidate(ratios)
-        if candidate is None:
-            self._candidate_pair = None
-            self._candidate_since = None
-            return None
-        if candidate != self._candidate_pair:
-            self._candidate_pair = candidate
-            self._candidate_since = now
-            return None
-        if self._candidate_since is None:
-            self._candidate_since = now
-            return None
-        if now - self._candidate_since < self._config.min_hold_sec:
-            return None
-
-        self._active_pair = candidate
-        self._blend_pair = candidate
-        self._candidate_pair = None
-        self._candidate_since = None
-        return f"activated:{candidate}"
-
-    def _candidate(self, ratios: Mapping[str, float]) -> str | None:
+    def _candidate(self, features: Mapping[str, FingertipContactFeature]) -> str | None:
         candidates = sorted(
             (
-                (float(value), finger)
-                for finger, value in ratios.items()
-                if self._takeover_target(self._config.profiles[finger], float(value)) > 0.0
+                (feature.distance_filtered, finger)
+                for finger, feature in features.items()
+                if feature.takeover_progress > 0.0
             ),
             key=lambda item: item[0],
         )
@@ -299,242 +441,253 @@ class FingertipContactStateMachine:
             return None
         return candidates[0][1]
 
-    def _takeover_target(self, profile: FingertipContactProfile, distance_ratio: float) -> float:
-        contact_distance = profile.contact_distance_p95_ratio
-        open_distance = profile.natural_open_distance_p05_ratio
-        start_distance = open_distance - self._config.takeover_start_progress * (
-            open_distance - contact_distance
+    def _release_intent(self, feature: FingertipContactFeature) -> bool:
+        return (
+            feature.velocity > 0.0
+            and self._peak_progress - feature.progress >= self._config.release_start_progress_delta
         )
-        full_distance = open_distance - self._config.full_takeover_progress * (
-            open_distance - contact_distance
+
+    def _reclose_intent(self, feature: FingertipContactFeature) -> bool:
+        return (
+            feature.velocity < 0.0
+            and feature.progress - self._trough_progress >= self._config.reclose_start_progress_delta
         )
-        if distance_ratio >= start_distance:
-            return 0.0
-        if distance_ratio <= full_distance:
-            return 1.0
-        return (start_distance - distance_ratio) / (start_distance - full_distance)
 
-    def _release_target(self, profile: FingertipContactProfile, distance_ratio: float) -> float:
-        """Continuous release amount from verified contact back to natural open.
-
-        Closing intentionally saturates before exact contact so the robot can
-        settle into a semantic grasp.  Releasing should not reuse that plateau:
-        once a firm contact has been reached, the human fingertip distance
-        directly controls how much semantic influence remains.
-        """
-        contact_distance = profile.contact_distance_p95_ratio
-        open_distance = profile.natural_open_distance_p05_ratio
-        if distance_ratio <= contact_distance:
-            return 1.0
-        if distance_ratio >= open_distance:
-            return 0.0
-        return (open_distance - distance_ratio) / (open_distance - contact_distance)
-
-    def _update_activation(self, ratios: Mapping[str, float], now: float) -> None:
-        if self._last_time is None:
-            self._last_time = now
-            return
-        elapsed = max(0.0, min(0.10, now - self._last_time))
-        self._last_time = now
-        if self._active_pair is not None:
-            profile = self._config.profiles[self._active_pair]
-            distance_ratio = ratios.get(self._active_pair)
-            if distance_ratio is None:
-                target = 0.0
-            else:
-                previous_distance = (
-                    self._last_active_distance
-                    if self._last_active_pair == self._active_pair
-                    else None
-                )
-                opening = (
-                    previous_distance is not None
-                    and distance_ratio > previous_distance + 1e-6
-                )
-                close_target = self._takeover_target(profile, distance_ratio)
-                if self._release_mode:
-                    if self._farthest_release_distance is None or distance_ratio > self._farthest_release_distance:
-                        self._farthest_release_distance = distance_ratio
-                    elif self._has_reclose_intent(profile, distance_ratio):
-                        self._release_mode = False
-                        self._reclose_mode = True
-                        self._farthest_release_distance = None
-                if close_target >= self._config.firm_contact_enter_activation:
-                    self._firm_contact = True
-                    if not self._release_mode or distance_ratio <= profile.contact_distance_p95_ratio:
-                        self._release_mode = False
-                        self._reclose_mode = False
-                        self._farthest_release_distance = None
-                    if not self._release_mode:
-                        self._closest_firm_distance = (
-                            distance_ratio
-                            if self._closest_firm_distance is None
-                            else min(self._closest_firm_distance, distance_ratio)
-                        )
-                if (
-                    self._firm_contact
-                    and not self._release_mode
-                    and opening
-                    and self._has_release_intent(profile, distance_ratio)
-                ):
-                    self._release_mode = True
-                    self._reclose_mode = False
-                    self._farthest_release_distance = distance_ratio
-                if self._release_mode and distance_ratio <= profile.contact_distance_p95_ratio:
-                    self._release_mode = False
-                    self._reclose_mode = False
-                    self._closest_firm_distance = distance_ratio
-                    self._farthest_release_distance = None
-                if self._firm_contact and self._release_mode:
-                    # During release, raw fingertip distances can briefly move
-                    # closer again because of sensor jitter or soft tissue
-                    # motion.  Do not let that single-frame noise increase
-                    # semantic takeover; otherwise the phase blender flips
-                    # back to "closing" and the L20 flexion slots twitch.
-                    target = min(self._release_target(profile, distance_ratio), self._activation)
-                elif self._firm_contact and self._reclose_mode:
-                    # After a half-open release, the normal close curve can be
-                    # lower than the current continuous distance target.  Keep
-                    # using the continuous distance curve while the user
-                    # pinches back in, otherwise the robot briefly closes and
-                    # then stalls until the hand is nearly closed again.
-                    target = max(close_target, self._release_target(profile, distance_ratio))
-                else:
-                    target = close_target
-                self._last_active_pair = self._active_pair
-                self._last_active_distance = distance_ratio
-            duration = (
-                self._config.activation_rise_sec
-                if target >= self._activation
-                else self._config.activation_release_sec
-            )
-            self._activation = _slew_towards(self._activation, target, elapsed, duration)
-            return
-        self._activation = _slew_towards(self._activation, 0.0, elapsed, self._config.activation_release_sec)
-        if self._activation <= 1e-6:
+    def _update_activation(self, target: float, elapsed: float) -> None:
+        target = max(0.0, min(1.0, float(target)))
+        duration = self._config.activation_rise_sec if target >= self._activation else self._config.activation_release_sec
+        self._activation = _slew_towards(self._activation, target, elapsed, duration)
+        if self._activation <= 1e-6 and target <= 0.0:
             self._activation = 0.0
-            self._blend_pair = None
-            self._firm_contact = False
-            self._release_mode = False
-            self._reclose_mode = False
-            self._last_active_pair = None
-            self._last_active_distance = None
-            self._closest_firm_distance = None
-            self._farthest_release_distance = None
 
-    def _has_release_intent(self, profile: FingertipContactProfile, distance_ratio: float) -> bool:
-        if self._closest_firm_distance is None:
-            return False
-        span = profile.natural_open_distance_p05_ratio - profile.contact_distance_p95_ratio
-        margin = max(1e-6, self._config.release_start_progress_delta * span)
-        return distance_ratio >= self._closest_firm_distance + margin
+    def _update_phase(self, elapsed: float) -> None:
+        self._phase = _slew_towards(
+            self._phase,
+            self._phase_target,
+            elapsed,
+            self._config.phase_switch_sec,
+        )
 
-    def _has_reclose_intent(
+
+class FingertipContactStateMachine:
+    """Compatibility wrapper around feature extraction and intent state."""
+
+    def __init__(self, config: FingertipContactConfig) -> None:
+        self._extractor = FingertipContactFeatureExtractor(config)
+        self._intent = ContactIntentStateMachine(config)
+
+    def reset(self) -> None:
+        self._extractor.reset()
+        self._intent.reset()
+
+    def update(self, ratios: Mapping[str, float], now_sec: float) -> FingertipContactDecision:
+        features = self._extractor.update(ratios, now_sec)
+        return self._intent.update(features, now_sec)
+
+
+class ContactSlotPlanner:
+    """Map progress and release phase into smooth per-slot semantic commands."""
+
+    ORIENTATION_SLOTS = {5, 10}
+
+    def __init__(self, phase_config: FingertipContactPhaseConfig, open_command_for_slot: Callable[[int], int]) -> None:
+        self._phase_config = phase_config
+        self._open_command_for_slot = open_command_for_slot
+
+    def plan(
         self,
         profile: FingertipContactProfile,
-        distance_ratio: float,
-    ) -> bool:
-        """Detect an intentional return toward contact while releasing.
+        progress: float,
+        state: str,
+        phase: float = 0.0,
+    ) -> tuple[dict[int, float], dict[int, int]]:
+        amount = max(0.0, min(1.0, float(progress)))
+        release_phase = 1.0 if state == CONTACT_STATE_RELEASE_INTENT and phase <= 0.0 else phase
+        return self._debug_plan(profile, amount, release_phase)
 
-        Release mode is monotonic to suppress single-frame distance jitter, but
-        the operator should not need to fully open the hand before pinching
-        again.  A clearly smaller fingertip distance means the user has changed
-        their mind and wants the contact semantic to close again.
-        """
-        if self._farthest_release_distance is None:
-            return False
-        span = profile.natural_open_distance_p05_ratio - profile.contact_distance_p95_ratio
-        margin = max(1e-6, self._config.reclose_start_progress_delta * span)
-        return distance_ratio <= self._farthest_release_distance - margin
+    def plan_command(
+        self,
+        command: list[int],
+        profile: FingertipContactProfile,
+        progress: float,
+        phase: float,
+    ) -> tuple[list[int], dict[int, float], dict[int, int]]:
+        if len(command) != 20:
+            raise ValueError("L20 contact planner needs a 20-slot command")
+        amount = max(0.0, min(1.0, float(progress)))
+        release_phase = max(0.0, min(1.0, float(phase)))
+        close_gains, release_gains, release_targets = self._curves(profile, amount)
+        output = [clamp_u8(value) for value in command]
+        debug_gains: dict[int, float] = {}
+        for slot in profile.override_slots:
+            current = output[slot]
+            contact = int(profile.contact_command[slot])
+            close_value = _bounded_lerp_command(current, contact, close_gains[slot], profile.max_command_delta)
+            release_target = release_targets.get(slot, contact)
+            release_value = _bounded_lerp_command(current, release_target, release_gains[slot], profile.max_command_delta)
+            output[slot] = clamp_u8(close_value + release_phase * (release_value - close_value))
+            debug_gains[slot] = close_gains[slot] * (1.0 - release_phase) + release_gains[slot] * release_phase
+        return output, debug_gains, release_targets
+
+    def _debug_plan(
+        self,
+        profile: FingertipContactProfile,
+        progress: float,
+        phase: float,
+    ) -> tuple[dict[int, float], dict[int, int]]:
+        close_gains, release_gains, release_targets = self._curves(profile, progress)
+        phase = max(0.0, min(1.0, float(phase)))
+        gains = {
+            slot: close_gains[slot] * (1.0 - phase) + release_gains[slot] * phase
+            for slot in profile.override_slots
+        }
+        return gains, release_targets if phase > 0.0 else {}
+
+    def _curves(
+        self,
+        profile: FingertipContactProfile,
+        progress: float,
+    ) -> tuple[dict[int, float], dict[int, float], dict[int, int]]:
+        amount = max(0.0, min(1.0, float(progress)))
+        close_orientation = _complete_early_progress(amount, self._phase_config.close_orientation_completion)
+        close_flexion = _delayed_progress(amount, self._phase_config.close_flexion_start)
+        release_flexion = _complete_early_progress(
+            1.0 - amount,
+            self._phase_config.release_flexion_open_completion,
+        )
+        release_orientation = 1.0 - math.pow(1.0 - amount, self._phase_config.release_orientation_gamma)
+        close_gains: dict[int, float] = {}
+        release_gains: dict[int, float] = {}
+        release_targets: dict[int, int] = {}
+        for slot in profile.override_slots:
+            if slot in self.ORIENTATION_SLOTS:
+                close_gains[slot] = close_orientation
+                release_gains[slot] = release_orientation
+            else:
+                close_gains[slot] = close_flexion
+                release_gains[slot] = release_flexion
+                release_targets[slot] = clamp_u8(self._open_command_for_slot(slot))
+        return close_gains, release_gains, release_targets
+
+
+class ContactCommandSmoother:
+    """Optional per-slot output slew after semantic planning."""
+
+    def __init__(self, max_step_per_cycle: int) -> None:
+        self._max_step = max(0, int(max_step_per_cycle))
+        self.reset()
+
+    def reset(self) -> None:
+        self._last_output: dict[int, int] = {}
+
+    def apply(
+        self,
+        base_command: list[int],
+        desired_command: list[int],
+        slots: tuple[int, ...],
+    ) -> list[int]:
+        if self._max_step >= 255:
+            output = list(desired_command)
+            for slot in slots:
+                self._last_output[slot] = clamp_u8(output[slot])
+            return output
+
+        output = list(desired_command)
+        for slot in slots:
+            desired = clamp_u8(desired_command[slot])
+            previous = self._last_output.get(slot, clamp_u8(base_command[slot]))
+            if self._max_step <= 0:
+                value = previous
+            else:
+                value = _step_u8_towards(previous, desired, self._max_step)
+            output[slot] = value
+            self._last_output[slot] = value
+        return output
 
 
 class FingertipContactCommandBlender:
-    """Apply pair-local semantic contact timing to an already-retargeted L20 command."""
+    """Apply slot-phase planning to an already-retargeted L20 command."""
 
     def __init__(
         self,
         phase_config: FingertipContactPhaseConfig,
         open_command_for_slot: Callable[[int], int],
+        *,
+        command_slew_per_cycle: int = 255,
     ) -> None:
-        self._phase_config = phase_config
-        self._open_command_for_slot = open_command_for_slot
+        self._planner = ContactSlotPlanner(phase_config, open_command_for_slot)
+        self._smoother = ContactCommandSmoother(command_slew_per_cycle)
         self.reset()
 
     def reset(self) -> None:
-        self._last_pair: str | None = None
-        self._last_activation = 0.0
-        self._is_closing = True
+        self._smoother.reset()
 
     def blend(
         self,
         command: list[int],
         profile: FingertipContactProfile,
         activation: float,
+        *,
+        state: str = CONTACT_STATE_ACTIVE,
     ) -> list[int]:
-        amount = max(0.0, min(1.0, float(activation)))
-        if amount <= 0.0:
-            self.reset()
-            return list(command)
-        slot_activations, slot_targets = self._phase_blend(profile, amount)
-        return blend_fingertip_contact_command(
+        phase = 1.0 if state == CONTACT_STATE_RELEASE_INTENT else 0.0
+        desired, _, _ = self._planner.plan_command(command, profile, activation, phase)
+        return self._smoother.apply(command, desired, profile.override_slots)
+
+
+class FingertipContactController:
+    """Single entry point for semantic fingertip contact retargeting."""
+
+    def __init__(
+        self,
+        config: FingertipContactConfig,
+        phase_config: FingertipContactPhaseConfig,
+        open_command_for_slot: Callable[[int], int],
+    ) -> None:
+        self._config = config
+        self._extractor = FingertipContactFeatureExtractor(config)
+        self._intent = ContactIntentStateMachine(config)
+        self._planner = ContactSlotPlanner(phase_config, open_command_for_slot)
+        self._smoother = ContactCommandSmoother(config.command_slew_per_cycle)
+
+    def reset(self) -> None:
+        self._extractor.reset()
+        self._intent.reset()
+        self._smoother.reset()
+
+    def apply(self, command: list[int], skeleton: Any, now_sec: float) -> tuple[list[int], FingertipContactDecision]:
+        ratios = thumb_fingertip_distance_ratios(skeleton)
+        features = self._extractor.update(ratios, now_sec)
+        decision = self._intent.update(features, now_sec)
+        if decision.pair is None or decision.activation <= 0.0:
+            self._smoother.reset()
+            return list(command), decision
+
+        profile = self._config.profiles[decision.pair]
+        base_slots = {slot: clamp_u8(command[slot]) for slot in profile.override_slots}
+        desired, slot_activations, slot_targets = self._planner.plan_command(
             command,
             profile,
-            amount,
+            decision.activation,
+            decision.phase,
+        )
+        output = self._smoother.apply(command, desired, profile.override_slots)
+        decision = FingertipContactDecision(
+            pair=decision.pair,
+            activation=decision.activation,
+            ratios=decision.ratios,
+            event=decision.event,
+            state=decision.state,
+            phase=decision.phase,
+            phase_target=decision.phase_target,
+            features=decision.features,
             slot_activations=slot_activations,
             slot_targets=slot_targets,
+            base_command_slots=base_slots,
+            desired_command_slots={slot: desired[slot] for slot in profile.override_slots},
+            command_slots={slot: output[slot] for slot in profile.override_slots},
         )
-
-    def _phase_blend(
-        self,
-        profile: FingertipContactProfile,
-        activation: float,
-    ) -> tuple[dict[int, float], dict[int, int]]:
-        amount = max(0.0, min(1.0, float(activation)))
-        pair = profile.finger
-        last_activation = self._last_activation if pair == self._last_pair else 0.0
-        deadband = self._phase_config.direction_change_deadband
-        if amount > last_activation + deadband:
-            self._is_closing = True
-        elif amount < last_activation - deadband:
-            self._is_closing = False
-
-        orientation_slots = {5, 10}
-        flexion_slots = [slot for slot in profile.override_slots if slot not in orientation_slots]
-        slot_activations: dict[int, float] = {}
-        slot_targets: dict[int, int] = {}
-        phase = self._phase_config
-
-        if self._is_closing:
-            orientation_amount = _complete_early_progress(
-                amount,
-                phase.close_orientation_completion,
-            )
-            flexion_amount = _delayed_progress(
-                amount,
-                phase.close_flexion_start,
-            )
-            for slot in orientation_slots.intersection(profile.override_slots):
-                slot_activations[slot] = orientation_amount
-            for slot in flexion_slots:
-                slot_activations[slot] = flexion_amount
-        else:
-            flexion_open_amount = _complete_early_progress(
-                1.0 - amount,
-                phase.release_flexion_open_completion,
-            )
-            orientation_amount = 1.0 - math.pow(
-                1.0 - amount,
-                phase.release_orientation_gamma,
-            )
-            for slot in orientation_slots.intersection(profile.override_slots):
-                slot_activations[slot] = orientation_amount
-            for slot in flexion_slots:
-                slot_activations[slot] = flexion_open_amount
-                slot_targets[slot] = clamp_u8(self._open_command_for_slot(slot))
-
-        self._last_pair = pair
-        self._last_activation = amount
-        return slot_activations, slot_targets
+        return output, decision
 
 
 def blend_fingertip_contact_command(
@@ -566,10 +719,44 @@ def blend_fingertip_contact_command(
             if slot_targets is not None and slot in slot_targets
             else int(profile.contact_command[slot])
         )
-        target_delta = target - current
-        bounded_delta = max(-profile.max_command_delta, min(profile.max_command_delta, target_delta))
-        output[slot] = clamp_u8(current + slot_amount * bounded_delta)
+        output[slot] = _bounded_lerp_command(current, target, slot_amount, profile.max_command_delta)
     return output
+
+
+def _profile_span(profile: FingertipContactProfile) -> float:
+    return max(1e-8, profile.natural_open_distance_p05_ratio - profile.contact_distance_p95_ratio)
+
+
+def _continuous_contact_progress(profile: FingertipContactProfile, distance_ratio: float) -> float:
+    return max(
+        0.0,
+        min(
+            1.0,
+            (profile.natural_open_distance_p05_ratio - distance_ratio) / _profile_span(profile),
+        ),
+    )
+
+
+def _takeover_contact_progress(config: FingertipContactConfig, progress: float) -> float:
+    amount = max(0.0, min(1.0, float(progress)))
+    if amount <= config.takeover_start_progress:
+        return 0.0
+    if amount >= config.full_takeover_progress:
+        return 1.0
+    return (amount - config.takeover_start_progress) / (
+        config.full_takeover_progress - config.takeover_start_progress
+    )
+
+
+def _release_phase_target(progress: float) -> float:
+    return max(0.0, min(1.0, 1.0 - float(progress)))
+
+
+def _bounded_lerp_command(current: int, target: int, amount: float, max_delta: int) -> int:
+    current = clamp_u8(current)
+    target = clamp_u8(target)
+    bounded_delta = max(-int(max_delta), min(int(max_delta), target - current))
+    return clamp_u8(current + max(0.0, min(1.0, float(amount))) * bounded_delta)
 
 
 def _point(value: Any) -> np.ndarray:
@@ -659,6 +846,15 @@ def _slew_towards(current: float, target: float, elapsed: float, duration: float
     if target >= current:
         return min(target, current + step)
     return max(target, current - step)
+
+
+def _step_u8_towards(current: int, target: int, max_step: int) -> int:
+    current = clamp_u8(current)
+    target = clamp_u8(target)
+    max_step = max(0, int(max_step))
+    if abs(target - current) <= max_step:
+        return target
+    return clamp_u8(current + max_step if target > current else current - max_step)
 
 
 def _complete_early_progress(value: float, completion: float) -> float:

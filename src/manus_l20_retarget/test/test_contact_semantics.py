@@ -6,8 +6,15 @@ import unittest
 import numpy as np
 
 from manus_l20_retarget.contact_semantics import (
+    CONTACT_STATE_ACTIVE,
+    CONTACT_STATE_HOLD,
+    CONTACT_STATE_RECLOSE,
+    CONTACT_STATE_RELEASE,
+    ContactCommandSmoother,
+    ContactSlotPlanner,
     FINGERTIP_CONTACT_SLOTS,
-    FingertipContactCommandBlender,
+    FingertipContactController,
+    FingertipContactFeatureExtractor,
     FingertipContactPhaseConfig,
     FingertipContactStateMachine,
     blend_fingertip_contact_command,
@@ -26,7 +33,7 @@ def _config_data() -> dict:
             },
             "robot": {
                 "override_slots": list(slots),
-                "max_command_delta": 20,
+                "max_command_delta": 255,
                 "contact_command": [10] * 20,
             },
         }
@@ -44,6 +51,9 @@ def _config_data() -> dict:
             "reclose_start_progress_delta": 0.02,
             "activation_rise_sec": 0.10,
             "activation_release_sec": 0.10,
+            "distance_filter_alpha": 1.0,
+            "command_slew_per_cycle": 255,
+            "phase_switch_sec": 0.08,
         },
         "contacts": contacts,
     }
@@ -53,229 +63,79 @@ def _finger(mcp, tip):
     return SimpleNamespace(mcp=np.asarray(mcp, dtype=np.float64), tip=np.asarray(tip, dtype=np.float64))
 
 
+def _skeleton(index_tip: float):
+    return SimpleNamespace(
+        thumb=_finger((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+        index=_finger((0.0, 0.0, 0.0), (index_tip, 0.0, 0.0)),
+        middle=_finger((0.3, 0.0, 0.0), (0.25, 0.5, 0.0)),
+        ring=_finger((0.7, 0.0, 0.0), (0.25, 0.75, 0.0)),
+        pinky=_finger((1.0, 0.0, 0.0), (0.25, 1.0, 0.0)),
+    )
+
+
 class FingertipContactSemanticsTest(unittest.TestCase):
     def test_tip_distances_are_normalized_by_palm_width(self) -> None:
-        skeleton = SimpleNamespace(
-            thumb=_finger((0.0, 0.0, 0.0), (0.25, 0.0, 0.0)),
-            index=_finger((0.0, 0.0, 0.0), (0.50, 0.0, 0.0)),
-            middle=_finger((0.3, 0.0, 0.0), (0.25, 0.5, 0.0)),
-            ring=_finger((0.7, 0.0, 0.0), (0.25, 0.75, 0.0)),
-            pinky=_finger((1.0, 0.0, 0.0), (0.25, 1.0, 0.0)),
-        )
-
-        ratios = thumb_fingertip_distance_ratios(skeleton)
+        ratios = thumb_fingertip_distance_ratios(_skeleton(0.25))
 
         self.assertAlmostEqual(ratios["index"], 0.25)
         self.assertNotIn("middle", ratios)
         self.assertNotIn("ring", ratios)
         self.assertNotIn("pinky", ratios)
 
-    def test_state_machine_latches_then_releases_with_hysteresis(self) -> None:
+    def test_config_parses_v2_filter_and_smoother_runtime(self) -> None:
+        data = _config_data()
+        data["runtime"]["distance_filter_alpha"] = 0.75
+        data["runtime"]["command_slew_per_cycle"] = 32
+        data["runtime"]["phase_switch_sec"] = 0.12
+
+        config = parse_fingertip_contact_config(data)
+
+        self.assertAlmostEqual(config.distance_filter_alpha, 0.75)
+        self.assertEqual(config.command_slew_per_cycle, 32)
+        self.assertAlmostEqual(config.phase_switch_sec, 0.12)
+
+    def test_feature_extractor_filters_distance_before_progress_and_velocity(self) -> None:
+        data = _config_data()
+        data["runtime"].update({"distance_filter_alpha": 0.5})
+        config = parse_fingertip_contact_config(data)
+        extractor = FingertipContactFeatureExtractor(config)
+
+        extractor.update({"index": 0.70}, 0.00)
+        first = extractor.update({"index": 0.10}, 0.01)["index"]
+        second = extractor.update({"index": 0.10}, 0.02)["index"]
+
+        self.assertAlmostEqual(first.distance_filtered, 0.40)
+        self.assertAlmostEqual(second.distance_filtered, 0.25)
+        self.assertLess(first.velocity, 0.0)
+        self.assertAlmostEqual(second.progress, (0.70 - 0.25) / (0.70 - 0.10))
+
+    def test_state_machine_latches_then_releases_with_named_state(self) -> None:
         config = parse_fingertip_contact_config(_config_data())
-        state = FingertipContactStateMachine(config)
-        near_index = {"index": 0.10, "middle": 0.60, "ring": 0.70, "pinky": 0.80}
-
-        self.assertIsNone(state.update(near_index, 0.00).pair)
-        self.assertIsNone(state.update(near_index, 0.05).pair)
-        active = state.update(near_index, 0.11)
-        self.assertEqual(active.pair, "index")
-        self.assertEqual(active.event, "activated:index")
-        self.assertGreater(active.activation, 0.0)
-
-        held = state.update({**near_index, "index": 0.30}, 0.20)
-        self.assertEqual(held.pair, "index")
-        self.assertIsNone(held.event)
-
-        partial_release = state.update({**near_index, "index": 0.50}, 0.21)
-        self.assertIsNone(partial_release.event)
-        self.assertEqual(partial_release.pair, "index")
-        self.assertGreater(partial_release.activation, 0.0)
-
-        released = state.update({**near_index, "index": 0.70}, 0.27)
-        self.assertEqual(released.event, "released:index")
-        self.assertIsNone(released.pair)
-        self.assertEqual(released.activation, 0.0)
-
-    def test_blend_changes_only_selected_slots_and_respects_delta_limit(self) -> None:
-        config = parse_fingertip_contact_config(_config_data())
-        profile = config.profiles["index"]
-        base = [100] * 20
-
-        blended = blend_fingertip_contact_command(base, profile, 0.5)
-
-        for slot in profile.override_slots:
-            self.assertEqual(blended[slot], 90)
-        for slot in set(range(20)) - set(profile.override_slots):
-            self.assertEqual(blended[slot], 100)
-
-    def test_blend_can_advance_orientation_before_flexion(self) -> None:
-        data = _config_data()
-        for contact in data["contacts"].values():
-            contact["robot"]["max_command_delta"] = 255
-        profile = parse_fingertip_contact_config(data).profiles["index"]
-
-        blended = blend_fingertip_contact_command(
-            [100] * 20,
-            profile,
-            0.25,
-            slot_activations={
-                0: 0.0,
-                1: 0.0,
-                5: 1.0,
-                10: 1.0,
-                15: 0.0,
-                16: 0.0,
-            },
-        )
-
-        self.assertEqual(blended[5], 10)
-        self.assertEqual(blended[10], 10)
-        for slot in (0, 1, 15, 16):
-            self.assertEqual(blended[slot], 100)
-
-    def test_blend_can_release_flexion_toward_open_target(self) -> None:
-        data = _config_data()
-        for contact in data["contacts"].values():
-            contact["robot"]["max_command_delta"] = 255
-        profile = parse_fingertip_contact_config(data).profiles["index"]
-
-        blended = blend_fingertip_contact_command(
-            [100] * 20,
-            profile,
-            0.75,
-            slot_activations={
-                0: 1.0,
-                1: 0.5,
-                5: 0.0,
-                10: 0.0,
-                15: 1.0,
-                16: 0.5,
-            },
-            slot_targets={
-                0: 255,
-                1: 255,
-                15: 255,
-                16: 255,
-            },
-        )
-
-        self.assertEqual(blended[0], 255)
-        self.assertEqual(blended[15], 255)
-        self.assertEqual(blended[1], 178)
-        self.assertEqual(blended[16], 178)
-        self.assertEqual(blended[5], 100)
-        self.assertEqual(blended[10], 100)
-
-    def test_command_blender_applies_close_and_release_phase_ordering(self) -> None:
-        data = _config_data()
-        for contact in data["contacts"].values():
-            contact["robot"]["max_command_delta"] = 255
-        profile = parse_fingertip_contact_config(data).profiles["index"]
-        blender = FingertipContactCommandBlender(
-            FingertipContactPhaseConfig(
-                close_orientation_completion=0.25,
-                close_flexion_start=0.40,
-                release_flexion_open_completion=0.65,
-                release_orientation_gamma=2.5,
-            ),
-            lambda slot: 255,
-        )
-
-        closing = blender.blend([100] * 20, profile, 0.25)
-        self.assertEqual(closing[5], 10)
-        self.assertEqual(closing[10], 10)
-        for slot in (0, 1, 15, 16):
-            self.assertEqual(closing[slot], 100)
-
-        blender.blend([100] * 20, profile, 1.0)
-        releasing = blender.blend([100] * 20, profile, 0.82)
-        for slot in (0, 1, 15, 16):
-            self.assertGreater(releasing[slot], 140)
-            self.assertLess(releasing[slot], 160)
-        self.assertLess(releasing[5], 20)
-        self.assertLess(releasing[10], 20)
-
-    def test_distance_controls_full_pose_takeover(self) -> None:
-        data = _config_data()
-        data["runtime"].update(
-            {
-                "min_hold_sec": 0.0,
-                "activation_rise_sec": 0.0,
-                "activation_release_sec": 0.0,
-            }
-        )
-        config = parse_fingertip_contact_config(data)
-        state = FingertipContactStateMachine(config)
-        ratios = {"index": 0.35, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
-
-        state.update(ratios, 0.00)
-        partial = state.update(ratios, 0.01)
-        self.assertEqual(partial.pair, "index")
-        self.assertAlmostEqual(partial.activation, 1.0 / 6.0)
-
-        full = state.update({**ratios, "index": 0.10}, 0.02)
-        self.assertEqual(full.pair, "index")
-        self.assertAlmostEqual(full.activation, 1.0)
-
-    def test_full_takeover_saturates_on_close_then_releases_continuously(self) -> None:
-        data = _config_data()
-        data["runtime"].update(
-            {
-                "min_hold_sec": 0.0,
-                "takeover_start_progress": 0.50,
-                "full_takeover_progress": 0.75,
-                "firm_contact_enter_activation": 0.90,
-                "release_start_progress_delta": 0.06,
-                "reclose_start_progress_delta": 0.02,
-                "activation_rise_sec": 0.0,
-                "activation_release_sec": 0.0,
-            }
-        )
-        config = parse_fingertip_contact_config(data)
-        state = FingertipContactStateMachine(config)
-        ratios = {"index": 0.24, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
-
-        state.update(ratios, 0.00)
-        full = state.update(ratios, 0.01)
-        self.assertEqual(full.pair, "index")
-        self.assertEqual(full.activation, 1.0)
-
-        still_held = state.update({**ratios, "index": 0.30}, 0.02)
-        self.assertAlmostEqual(still_held.activation, (0.70 - 0.30) / (0.70 - 0.10))
-
-        released_from_firm_hold = state.update({**ratios, "index": 0.36}, 0.03)
-        self.assertAlmostEqual(
-            released_from_firm_hold.activation,
-            (0.70 - 0.36) / (0.70 - 0.10),
-        )
-
-    def test_release_mode_is_monotonic_through_distance_noise(self) -> None:
-        data = _config_data()
-        data["runtime"].update(
-            {
-                "min_hold_sec": 0.0,
-                "takeover_start_progress": 0.50,
-                "full_takeover_progress": 0.75,
-                "firm_contact_enter_activation": 0.90,
-                "release_start_progress_delta": 0.06,
-                "reclose_start_progress_delta": 0.02,
-                "activation_rise_sec": 0.0,
-                "activation_release_sec": 0.0,
-            }
-        )
-        config = parse_fingertip_contact_config(data)
         state = FingertipContactStateMachine(config)
         ratios = {"index": 0.10, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
 
-        state.update(ratios, 0.00)
-        full = state.update(ratios, 0.01)
-        self.assertEqual(full.activation, 1.0)
+        self.assertIsNone(state.update(ratios, 0.00).pair)
+        self.assertIsNone(state.update(ratios, 0.05).pair)
+        active = state.update(ratios, 0.11)
+        self.assertEqual(active.pair, "index")
+        self.assertEqual(active.event, "activated:index")
+        self.assertEqual(active.state, CONTACT_STATE_HOLD)
+        self.assertEqual(active.phase, 0.0)
+        self.assertGreater(active.activation, 0.0)
 
-        releasing = state.update({**ratios, "index": 0.36}, 0.02)
-        self.assertLess(releasing.activation, 1.0)
+        releasing = state.update({**ratios, "index": 0.50}, 0.14)
+        self.assertEqual(releasing.pair, "index")
+        self.assertEqual(releasing.state, CONTACT_STATE_RELEASE)
+        self.assertGreater(releasing.phase, 0.0)
+        self.assertLess(releasing.phase, 1.0)
 
-        noisy_closer = state.update({**ratios, "index": 0.355}, 0.03)
-        self.assertLessEqual(noisy_closer.activation, releasing.activation)
+        handoff = state.update({**ratios, "index": 0.70}, 0.20)
+        self.assertIsNone(handoff.event)
+        self.assertEqual(handoff.pair, "index")
+
+        released = state.update({**ratios, "index": 0.70}, 0.26)
+        self.assertEqual(released.event, "released:index")
+        self.assertIsNone(released.pair)
 
     def test_release_mode_allows_intentional_reclose_before_full_open(self) -> None:
         data = _config_data()
@@ -285,97 +145,52 @@ class FingertipContactSemanticsTest(unittest.TestCase):
                 "takeover_start_progress": 0.50,
                 "full_takeover_progress": 0.75,
                 "firm_contact_enter_activation": 0.90,
-                "release_start_progress_delta": 0.06,
-                "reclose_start_progress_delta": 0.02,
                 "activation_rise_sec": 0.0,
                 "activation_release_sec": 0.0,
             }
         )
-        config = parse_fingertip_contact_config(data)
-        state = FingertipContactStateMachine(config)
+        state = FingertipContactStateMachine(parse_fingertip_contact_config(data))
         ratios = {"index": 0.10, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
 
         state.update(ratios, 0.00)
         full = state.update(ratios, 0.01)
         self.assertEqual(full.activation, 1.0)
 
-        releasing = state.update({**ratios, "index": 0.36}, 0.02)
+        releasing = state.update({**ratios, "index": 0.50}, 0.02)
+        self.assertEqual(releasing.state, CONTACT_STATE_RELEASE)
         self.assertLess(releasing.activation, 1.0)
 
-        reclosing = state.update({**ratios, "index": 0.28}, 0.03)
+        reclosing = state.update({**ratios, "index": 0.46}, 0.03)
+        self.assertEqual(reclosing.state, CONTACT_STATE_RECLOSE)
         self.assertGreater(reclosing.activation, releasing.activation)
-        self.assertEqual(reclosing.pair, "index")
+        self.assertLess(reclosing.phase_target, releasing.phase_target)
 
-    def test_reclose_after_wide_release_keeps_following_distance_curve(self) -> None:
+    def test_release_phase_target_is_small_near_closed_contact(self) -> None:
         data = _config_data()
         data["runtime"].update(
             {
                 "min_hold_sec": 0.0,
                 "takeover_start_progress": 0.50,
                 "full_takeover_progress": 0.75,
-                "firm_contact_enter_activation": 0.90,
-                "release_start_progress_delta": 0.06,
-                "reclose_start_progress_delta": 0.02,
                 "activation_rise_sec": 0.0,
                 "activation_release_sec": 0.0,
+                "phase_switch_sec": 0.0,
             }
         )
-        config = parse_fingertip_contact_config(data)
-        state = FingertipContactStateMachine(config)
+        state = FingertipContactStateMachine(parse_fingertip_contact_config(data))
         ratios = {"index": 0.10, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
 
         state.update(ratios, 0.00)
-        full = state.update(ratios, 0.01)
-        self.assertEqual(full.activation, 1.0)
+        state.update(ratios, 0.01)
+        near_closed_release = state.update({**ratios, "index": 0.142}, 0.02)
 
-        wide_release = state.update({**ratios, "index": 0.50}, 0.02)
-        self.assertAlmostEqual(wide_release.activation, (0.70 - 0.50) / (0.70 - 0.10))
-
-        reclose_start = state.update({**ratios, "index": 0.47}, 0.03)
-        self.assertGreater(reclose_start.activation, wide_release.activation)
-
-        reclose_continue = state.update({**ratios, "index": 0.46}, 0.04)
-        self.assertGreater(reclose_continue.activation, reclose_start.activation)
-
-    def test_slow_close_noise_does_not_trigger_release_mode(self) -> None:
-        data = _config_data()
-        data["runtime"].update(
-            {
-                "min_hold_sec": 0.0,
-                "takeover_start_progress": 0.50,
-                "full_takeover_progress": 0.75,
-                "firm_contact_enter_activation": 0.90,
-                "release_start_progress_delta": 0.10,
-                "reclose_start_progress_delta": 0.02,
-                "activation_rise_sec": 0.0,
-                "activation_release_sec": 0.0,
-            }
-        )
-        config = parse_fingertip_contact_config(data)
-        state = FingertipContactStateMachine(config)
-        ratios = {"index": 0.22, "middle": 0.70, "ring": 0.70, "pinky": 0.70}
-
-        state.update(ratios, 0.00)
-        firm = state.update(ratios, 0.01)
-        self.assertEqual(firm.activation, 1.0)
-
-        # 0.24 is slightly farther than the closest firm distance, but the
-        # change is below release_start_progress_delta * calibrated_span.
-        jitter = state.update({**ratios, "index": 0.24}, 0.02)
-        self.assertEqual(jitter.activation, 1.0)
-
-    def test_full_takeover_reaches_contact_command_for_dynamic_slots(self) -> None:
-        data = _config_data()
-        for contact in data["contacts"].values():
-            contact["robot"]["max_command_delta"] = 255
-        profile = parse_fingertip_contact_config(data).profiles["index"]
-
-        blended = blend_fingertip_contact_command([100] * 20, profile, 1.0)
-
-        for slot in profile.override_slots:
-            self.assertEqual(blended[slot], 10)
-        for slot in set(range(20)) - set(profile.override_slots):
-            self.assertEqual(blended[slot], 100)
+        # progress is still about 0.93.  It may be classified as release
+        # intent, but release phase must stay small instead of hard-switching
+        # to 1.0 and dropping flexion slot gains.
+        self.assertEqual(near_closed_release.state, CONTACT_STATE_RELEASE)
+        self.assertGreater(near_closed_release.activation, 0.90)
+        self.assertLess(near_closed_release.phase_target, 0.10)
+        self.assertLess(near_closed_release.phase, 0.10)
 
     def test_non_index_contact_does_not_latch(self) -> None:
         config = parse_fingertip_contact_config(_config_data())
@@ -384,6 +199,99 @@ class FingertipContactSemanticsTest(unittest.TestCase):
 
         self.assertIsNone(state.update(middle_only, 0.00).pair)
         self.assertIsNone(state.update(middle_only, 0.20).pair)
+
+    def test_blend_changes_only_selected_slots_and_respects_delta_limit(self) -> None:
+        data = _config_data()
+        data["contacts"]["index"]["robot"]["max_command_delta"] = 20
+        profile = parse_fingertip_contact_config(data).profiles["index"]
+
+        blended = blend_fingertip_contact_command([100] * 20, profile, 0.5)
+
+        for slot in profile.override_slots:
+            self.assertEqual(blended[slot], 90)
+        for slot in set(range(20)) - set(profile.override_slots):
+            self.assertEqual(blended[slot], 100)
+
+    def test_slot_planner_advances_orientation_before_flexion_when_closing(self) -> None:
+        profile = parse_fingertip_contact_config(_config_data()).profiles["index"]
+        planner = ContactSlotPlanner(
+            FingertipContactPhaseConfig(close_orientation_completion=0.25, close_flexion_start=0.40),
+            lambda slot: 255,
+        )
+
+        slot_activations, slot_targets = planner.plan(profile, 0.25, CONTACT_STATE_ACTIVE, 0.0)
+
+        self.assertEqual(slot_targets, {})
+        self.assertEqual(slot_activations[5], 1.0)
+        self.assertEqual(slot_activations[10], 1.0)
+        for slot in (0, 1, 15, 16):
+            self.assertEqual(slot_activations[slot], 0.0)
+
+    def test_slot_planner_phase_blends_close_and_release_curves(self) -> None:
+        profile = parse_fingertip_contact_config(_config_data()).profiles["index"]
+        planner = ContactSlotPlanner(
+            FingertipContactPhaseConfig(
+                release_flexion_open_completion=0.65,
+                release_orientation_gamma=2.5,
+            ),
+            lambda slot: 255,
+        )
+
+        close_slots, close_targets = planner.plan(profile, 0.82, CONTACT_STATE_ACTIVE, 0.0)
+        release_slots, release_targets = planner.plan(profile, 0.82, CONTACT_STATE_RELEASE, 1.0)
+        blended_slots, blended_targets = planner.plan(profile, 0.82, CONTACT_STATE_RELEASE, 0.5)
+
+        for slot in (0, 1, 15, 16):
+            self.assertEqual(release_targets[slot], 255)
+            self.assertEqual(blended_targets[slot], 255)
+            self.assertGreater(blended_slots[slot], min(close_slots[slot], release_slots[slot]))
+            self.assertLess(blended_slots[slot], max(close_slots[slot], release_slots[slot]))
+        for slot in (5, 10):
+            self.assertGreater(close_slots[slot], release_slots[slot])
+            self.assertGreater(blended_slots[slot], release_slots[slot])
+            self.assertLess(blended_slots[slot], close_slots[slot])
+
+    def test_command_smoother_slews_each_semantic_slot(self) -> None:
+        smoother = ContactCommandSmoother(16)
+        base = [100] * 20
+        desired = [100] * 20
+        for slot in FINGERTIP_CONTACT_SLOTS["index"]:
+            desired[slot] = 10
+
+        first = smoother.apply(base, desired, FINGERTIP_CONTACT_SLOTS["index"])
+        second = smoother.apply(base, desired, FINGERTIP_CONTACT_SLOTS["index"])
+
+        for slot in FINGERTIP_CONTACT_SLOTS["index"]:
+            self.assertEqual(first[slot], 84)
+            self.assertEqual(second[slot], 68)
+
+    def test_controller_applies_semantic_command_and_debug_fields(self) -> None:
+        data = _config_data()
+        data["runtime"].update(
+            {
+                "min_hold_sec": 0.0,
+                "activation_rise_sec": 0.0,
+                "activation_release_sec": 0.0,
+                "command_slew_per_cycle": 255,
+            }
+        )
+        config = parse_fingertip_contact_config(data)
+        controller = FingertipContactController(
+            config,
+            FingertipContactPhaseConfig(close_orientation_completion=0.25, close_flexion_start=0.40),
+            lambda slot: 255,
+        )
+
+        controller.apply([100] * 20, _skeleton(0.10), 0.00)
+        output, decision = controller.apply([100] * 20, _skeleton(0.10), 0.01)
+
+        self.assertEqual(decision.pair, "index")
+        self.assertEqual(decision.state, CONTACT_STATE_HOLD)
+        self.assertEqual(decision.phase, 0.0)
+        self.assertTrue(decision.slot_activations)
+        self.assertEqual(decision.command_slots[5], output[5])
+        self.assertEqual(output[5], 10)
+        self.assertEqual(output[10], 10)
 
 
 if __name__ == "__main__":

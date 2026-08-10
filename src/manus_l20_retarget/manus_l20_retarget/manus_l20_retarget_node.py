@@ -18,12 +18,10 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 
 from .contact_semantics import (
-    FingertipContactCommandBlender,
     FingertipContactConfig,
+    FingertipContactController,
     FingertipContactPhaseConfig,
-    FingertipContactStateMachine,
     parse_fingertip_contact_config,
-    thumb_fingertip_distance_ratios,
 )
 from .mapping import clamp_u8
 from .manus_landmarks import _palm_frame
@@ -194,9 +192,10 @@ class ManusL20RetargetNode(Node):
         self._lock_neutral_slots = [index for index in self._lock_neutral_slots if index not in (0, 5, 10, 15)]
         self._thumb_flexion_ergonomics_mapping: dict[str, Any] | None = None
         self._fingertip_contact_config: FingertipContactConfig | None = None
-        self._fingertip_contact_state: FingertipContactStateMachine | None = None
+        self._fingertip_contact_controller: FingertipContactController | None = None
         self._fingertip_contact_debug = bool(self.get_parameter("fingertip_contact_debug").value)
-        fingertip_contact_phase = FingertipContactPhaseConfig(
+        self._last_fingertip_contact_debug_time = 0.0
+        self._fingertip_contact_phase = FingertipContactPhaseConfig(
             close_orientation_completion=float(
                 self.get_parameter("fingertip_contact_close_orientation_completion").value
             ),
@@ -205,10 +204,6 @@ class ManusL20RetargetNode(Node):
                 self.get_parameter("fingertip_contact_release_flexion_open_completion").value
             ),
             release_orientation_gamma=float(self.get_parameter("fingertip_contact_release_orientation_gamma").value),
-        )
-        self._fingertip_contact_blender = FingertipContactCommandBlender(
-            fingertip_contact_phase,
-            self._fingertip_contact_open_command,
         )
         self._thumb_flexion_root_gamma = max(
             0.05,
@@ -535,11 +530,16 @@ class ManusL20RetargetNode(Node):
         except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
             raise RuntimeError(f"invalid fingertip contact semantics calibration {path}: {exc}") from exc
         self._fingertip_contact_config = config
-        self._fingertip_contact_state = FingertipContactStateMachine(config)
+        self._fingertip_contact_controller = FingertipContactController(
+            config,
+            self._fingertip_contact_phase,
+            self._fingertip_contact_open_command,
+        )
         self.get_logger().info(
             "loaded fingertip contact semantics "
             f"path={path}, pairs={list(config.profiles)}, hold={config.min_hold_sec:.3f}s, "
-            f"release={config.release_hold_sec:.3f}s"
+            f"release={config.release_hold_sec:.3f}s, filter_alpha={config.distance_filter_alpha:.3f}, "
+            f"command_slew={config.command_slew_per_cycle}"
         )
 
     def _prepare_l20_thumb_ik_imports(self) -> None:
@@ -623,9 +623,8 @@ class ManusL20RetargetNode(Node):
         self._publish(self._last_command)
 
     def _reset_fingertip_contact_semantics(self) -> None:
-        if self._fingertip_contact_state is not None:
-            self._fingertip_contact_state.reset()
-        self._fingertip_contact_blender.reset()
+        if self._fingertip_contact_controller is not None:
+            self._fingertip_contact_controller.reset()
 
     def _thumb_segment_frame_parameter(self, path_value: str) -> dict[str, Any] | None:
         path_text = str(path_value).strip()
@@ -831,33 +830,46 @@ class ManusL20RetargetNode(Node):
             command[slot] = value
 
     def _apply_fingertip_contact_semantics(self, command: list[int], skeleton: Any) -> None:
-        config = self._fingertip_contact_config
-        state = self._fingertip_contact_state
-        if config is None or state is None:
+        controller = self._fingertip_contact_controller
+        if controller is None:
             return
         try:
-            ratios = thumb_fingertip_distance_ratios(skeleton)
-            decision = state.update(ratios, monotonic())
+            updated_command, decision = controller.apply(command, skeleton, monotonic())
         except (AttributeError, TypeError, ValueError) as exc:
-            state.reset()
+            controller.reset()
             if self._fingertip_contact_debug:
                 self.get_logger().warning(f"fingertip contact frame ignored: {exc}")
             return
 
-        if decision.pair is not None and decision.activation > 0.0:
-            profile = config.profiles[decision.pair]
-            command[:] = self._fingertip_contact_blender.blend(
-                command,
-                profile,
-                decision.activation,
+        command[:] = updated_command
+        if self._fingertip_contact_debug:
+            self._debug_fingertip_contact_decision(decision)
+
+    def _debug_fingertip_contact_decision(self, decision: Any) -> None:
+        now = monotonic()
+        if decision.event is None and now - self._last_fingertip_contact_debug_time < 0.20:
+            return
+        self._last_fingertip_contact_debug_time = now
+        feature = decision.features.get(decision.pair) if decision.pair is not None else None
+        if feature is None and decision.features:
+            feature = next(iter(decision.features.values()))
+        feature_text = ""
+        if feature is not None:
+            feature_text = (
+                f" distance_raw={feature.distance_raw:.4f} distance_filtered={feature.distance_filtered:.4f} "
+                f"progress={feature.progress:.3f} velocity={feature.velocity:.4f}"
             )
-        else:
-            self._fingertip_contact_blender.reset()
-        if decision.event is not None and self._fingertip_contact_debug:
-            rounded_ratios = {finger: round(value, 4) for finger, value in decision.ratios.items()}
-            self.get_logger().info(
-                f"fingertip_contact {decision.event} activation={decision.activation:.3f} ratios={rounded_ratios}"
-            )
+        slots = {slot: round(value, 3) for slot, value in decision.slot_activations.items()}
+        base_slots = dict(decision.base_command_slots)
+        desired_slots = dict(decision.desired_command_slots)
+        command_slots = dict(decision.command_slots)
+        prefix = f"fingertip_contact {decision.event}" if decision.event else "fingertip_contact"
+        self.get_logger().info(
+            f"{prefix} state={decision.state} pair={decision.pair} activation={decision.activation:.3f} "
+            f"phase={decision.phase:.3f} phase_target={decision.phase_target:.3f}"
+            f"{feature_text} slot_activation={slots} base_slots={base_slots} "
+            f"desired_slots={desired_slots} command_slots={command_slots}"
+        )
 
     def _fingertip_contact_open_command(self, slot: int) -> int:
         if self._thumb_flexion_ergonomics_mapping is not None:

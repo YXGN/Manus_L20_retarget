@@ -6,14 +6,17 @@ source:
   unit: palm_width_ratio
 runtime:
   enabled: true
-  min_hold_sec: 0.1
+  min_hold_sec: 0.0
   release_hold_sec: 0.05
   candidate_gap_ratio: 0.02
   takeover_start_progress: 0.35
   release_start_progress_delta: 0.06
   reclose_start_progress_delta: 0.005
-  activation_rise_sec: 0.04
-  activation_release_sec: 0.06
+  activation_rise_sec: 0.0
+  activation_release_sec: 0.25
+  distance_filter_alpha: 0.85
+  command_slew_per_cycle: 255
+  phase_switch_sec: 0.25
 contacts:
   index:
     human:

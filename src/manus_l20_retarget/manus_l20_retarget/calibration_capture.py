@@ -415,6 +415,9 @@ def _build_fingertip_contact_calibration(
     takeover_start_progress: float,
     activation_rise_sec: float,
     activation_release_sec: float,
+    distance_filter_alpha: float,
+    command_slew_per_cycle: int,
+    phase_switch_sec: float,
     robot_commands: dict[str, list[int]],
     max_command_delta: int,
 ) -> dict[str, Any]:
@@ -462,6 +465,9 @@ def _build_fingertip_contact_calibration(
             "reclose_start_progress_delta": 0.005,
             "activation_rise_sec": round(float(activation_rise_sec), 4),
             "activation_release_sec": round(float(activation_release_sec), 4),
+            "distance_filter_alpha": round(float(distance_filter_alpha), 4),
+            "command_slew_per_cycle": int(command_slew_per_cycle),
+            "phase_switch_sec": round(float(phase_switch_sec), 4),
         },
         "contacts": contacts,
     }
@@ -573,6 +579,9 @@ def _validate_fingertip_contact_values(
     takeover_start_progress: float,
     activation_rise_sec: float,
     activation_release_sec: float,
+    distance_filter_alpha: float,
+    command_slew_per_cycle: int,
+    phase_switch_sec: float,
     max_command_delta: int,
 ) -> None:
     nonnegative = {
@@ -581,6 +590,9 @@ def _validate_fingertip_contact_values(
         "candidate_gap_ratio": candidate_gap_ratio,
         "activation_rise_sec": activation_rise_sec,
         "activation_release_sec": activation_release_sec,
+        "distance_filter_alpha": distance_filter_alpha,
+        "command_slew_per_cycle": command_slew_per_cycle,
+        "phase_switch_sec": phase_switch_sec,
         "max_command_delta": max_command_delta,
     }
     invalid = [
@@ -592,6 +604,8 @@ def _validate_fingertip_contact_values(
         raise RuntimeError(f"fingertip contact arguments must be nonnegative: {', '.join(invalid)}")
     if not math.isfinite(takeover_start_progress) or not 0.0 <= takeover_start_progress < 1.0:
         raise RuntimeError("takeover-start-progress must be in [0.0, 1.0)")
+    if not math.isfinite(float(distance_filter_alpha)) or not 0.0 <= float(distance_filter_alpha) <= 1.0:
+        raise RuntimeError("distance-filter-alpha must be in [0.0, 1.0]")
 
 
 def _config_output_path(hand: str, filename: str, override: str) -> str:
@@ -776,7 +790,10 @@ class FingertipContactCalibrationSession:
         candidate_gap_ratio: float = 0.02,
         takeover_start_progress: float = 0.35,
         activation_rise_sec: float = 0.04,
-        activation_release_sec: float = 0.06,
+        activation_release_sec: float = 0.25,
+        distance_filter_alpha: float = 0.85,
+        command_slew_per_cycle: int = 255,
+        phase_switch_sec: float = 0.25,
         max_command_delta: int = 255,
         robot_commands: dict[str, Any] | None = None,
     ) -> None:
@@ -795,6 +812,9 @@ class FingertipContactCalibrationSession:
         self.takeover_start_progress = float(takeover_start_progress)
         self.activation_rise_sec = float(activation_rise_sec)
         self.activation_release_sec = float(activation_release_sec)
+        self.distance_filter_alpha = float(distance_filter_alpha)
+        self.command_slew_per_cycle = int(command_slew_per_cycle)
+        self.phase_switch_sec = float(phase_switch_sec)
         self.max_command_delta = int(max_command_delta)
         _validate_fingertip_contact_values(
             min_hold_sec=self.min_hold_sec,
@@ -803,6 +823,9 @@ class FingertipContactCalibrationSession:
             takeover_start_progress=self.takeover_start_progress,
             activation_rise_sec=self.activation_rise_sec,
             activation_release_sec=self.activation_release_sec,
+            distance_filter_alpha=self.distance_filter_alpha,
+            command_slew_per_cycle=self.command_slew_per_cycle,
+            phase_switch_sec=self.phase_switch_sec,
             max_command_delta=self.max_command_delta,
         )
         provided_commands = robot_commands or {}
@@ -855,6 +878,9 @@ class FingertipContactCalibrationSession:
             takeover_start_progress=self.takeover_start_progress,
             activation_rise_sec=self.activation_rise_sec,
             activation_release_sec=self.activation_release_sec,
+            distance_filter_alpha=self.distance_filter_alpha,
+            command_slew_per_cycle=self.command_slew_per_cycle,
+            phase_switch_sec=self.phase_switch_sec,
             robot_commands=self.robot_commands,
             max_command_delta=self.max_command_delta,
         )
