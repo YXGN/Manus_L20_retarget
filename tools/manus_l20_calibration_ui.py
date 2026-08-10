@@ -1243,7 +1243,7 @@ class ManusL20CalibrationPage(QWidget):
                 if str(path) not in self.saved_paths:
                     self.saved_paths.append(str(path))
                 self.progress = 100
-                self.result.setText("指尖接触标定完成，配置已保存；runtime.enabled 保持 false。")
+                self.result.setText("指尖接触标定完成，配置已保存。")
             else:
                 self.progress = int(100 * self.contact_index / len(self.CONTACT_POSES))
                 self.result.setText(

@@ -855,9 +855,19 @@ class ManusL20RetargetNode(Node):
             feature = next(iter(decision.features.values()))
         feature_text = ""
         if feature is not None:
+            vector_text = ""
+            if feature.vector_palm_ratio is not None:
+                vector_text = (
+                    " vector_palm=["
+                    f"{feature.vector_palm_ratio[0]:.4f},{feature.vector_palm_ratio[1]:.4f},"
+                    f"{feature.vector_palm_ratio[2]:.4f}]"
+                )
             feature_text = (
                 f" distance_raw={feature.distance_raw:.4f} distance_filtered={feature.distance_filtered:.4f} "
-                f"progress={feature.progress:.3f} velocity={feature.velocity:.4f}"
+                f"progress={feature.progress:.3f} distance_progress={feature.distance_progress:.3f} "
+                f"projected_progress={feature.projected_progress:.3f} "
+                f"orthogonal_error={feature.orthogonal_error:.4f} direction_gate={feature.direction_gate:.3f} "
+                f"velocity={feature.velocity:.4f}{vector_text}"
             )
         slots = {slot: round(value, 3) for slot, value in decision.slot_activations.items()}
         base_slots = dict(decision.base_command_slots)

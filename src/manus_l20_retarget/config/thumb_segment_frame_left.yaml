@@ -2,13 +2,13 @@ schema: manus_l20.thumb_segment_frame.v1
 segment_start: 2
 segment_end: 3
 manus_open_vector:
-- -0.020383
-- 0.033011
-- 0.005116
+- -0.024837
+- 0.02685
+- 0.001575
 manus_touch_vector:
-- 0.021914
-- 0.029789
-- 0.012859
+- 0.011015
+- 0.033613
+- 0.009374
 robot_open_command:
 - 255      # 0  Thumb Base / 拇指根部弯曲
 - 255      # 1  Index Finger Base / 食指根部弯曲
@@ -36,12 +36,12 @@ robot_touch_command:
 - 255      # 2  Middle Finger Base / 中指根部弯曲
 - 255      # 3  Ring Finger Base / 无名指根部弯曲
 - 255      # 4  Pinky Finger Base / 小指根部弯曲
-- 0       # 5  Thumb Roll / 拇指 roll
+- 0        # 5  Thumb Roll / 拇指 roll
 - 163      # 6  Index Finger Yaw / 食指侧摆
 - 129      # 7  Middle Finger Yaw / 中指侧摆
 - 86       # 8  Ring Finger Yaw / 无名指侧摆
 - 62       # 9  Pinky Finger Yaw / 小指侧摆
-- 10      # 10 Thumb Yaw / 拇指 yaw
+- 10       # 10 Thumb Yaw / 拇指 yaw
 - 255      # 11 Reserved / 保留位
 - 255      # 12 Reserved / 保留位
 - 255      # 13 Reserved / 保留位

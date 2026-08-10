@@ -33,6 +33,8 @@ class FingertipContactProfile:
     finger: str
     natural_open_distance_p05_ratio: float
     contact_distance_p95_ratio: float
+    natural_open_vector_palm_ratio: tuple[float, float, float] | None
+    contact_vector_palm_ratio: tuple[float, float, float] | None
     contact_command: tuple[int, ...]
     override_slots: tuple[int, ...]
     max_command_delta: int
@@ -55,6 +57,14 @@ class FingertipContactConfig:
     distance_filter_alpha: float = 1.0
     command_slew_per_cycle: int = 255
     phase_switch_sec: float = 0.08
+    direction_gate_start_error_ratio: float = 0.25
+    direction_gate_zero_error_ratio: float = 0.55
+
+
+@dataclass(frozen=True, slots=True)
+class FingertipContactMeasurement:
+    distance_ratio: float
+    vector_palm_ratio: tuple[float, float, float] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +75,11 @@ class FingertipContactFeature:
     progress: float
     takeover_progress: float
     velocity: float
+    distance_progress: float = 0.0
+    projected_progress: float = 0.0
+    orthogonal_error: float = 0.0
+    direction_gate: float = 1.0
+    vector_palm_ratio: tuple[float, float, float] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,8 +129,13 @@ class FingertipContactPhaseConfig:
         )
 
 
-def thumb_fingertip_distance_ratios(skeleton: Any) -> dict[str, float]:
-    """Measure thumb-to-finger tip distances in units of palm width."""
+def thumb_fingertip_contact_measurements(skeleton: Any) -> dict[str, FingertipContactMeasurement]:
+    """Measure thumb-to-finger contacts in palm-width units.
+
+    The distance ratio is the legacy spherical trigger signal.  The optional
+    palm-local vector is used by directional semantics when the calibration YAML
+    contains matching open/contact vectors.
+    """
     thumb_tip = _point(skeleton.thumb.tip)
     index_mcp = _point(skeleton.index.mcp)
     pinky_mcp = _point(skeleton.pinky.mcp)
@@ -123,14 +143,36 @@ def thumb_fingertip_distance_ratios(skeleton: Any) -> dict[str, float]:
     if not math.isfinite(palm_width) or palm_width <= 1e-8:
         raise ValueError("cannot measure fingertip contact: palm width is degenerate")
 
-    ratios: dict[str, float] = {}
+    frame = _skeleton_palm_frame(skeleton)
+
+    measurements: dict[str, FingertipContactMeasurement] = {}
     for finger in FINGERTIP_CONTACT_FINGERS:
         tip = _point(getattr(skeleton, finger).tip)
-        distance = float(np.linalg.norm(thumb_tip - tip))
+        vector = thumb_tip - tip
+        distance = float(np.linalg.norm(vector))
         if not math.isfinite(distance):
             raise ValueError(f"cannot measure fingertip contact: {finger} distance is not finite")
-        ratios[finger] = distance / palm_width
-    return ratios
+        vector_palm_ratio = None
+        if frame is not None:
+            lateral, forward, normal = frame
+            vector_palm_ratio = (
+                float(np.dot(vector, lateral) / palm_width),
+                float(np.dot(vector, forward) / palm_width),
+                float(np.dot(vector, normal) / palm_width),
+            )
+        measurements[finger] = FingertipContactMeasurement(
+            distance_ratio=distance / palm_width,
+            vector_palm_ratio=vector_palm_ratio,
+        )
+    return measurements
+
+
+def thumb_fingertip_distance_ratios(skeleton: Any) -> dict[str, float]:
+    """Measure thumb-to-finger tip distances in units of palm width."""
+    return {
+        finger: measurement.distance_ratio
+        for finger, measurement in thumb_fingertip_contact_measurements(skeleton).items()
+    }
 
 
 def parse_fingertip_contact_config(data: Any) -> FingertipContactConfig:
@@ -169,10 +211,25 @@ def parse_fingertip_contact_config(data: Any) -> FingertipContactConfig:
 
         command = _command(robot.get("contact_command"), f"{finger}.contact_command")
         override_slots = _slots(robot.get("override_slots"), finger)
+        open_vector = _optional_vector3(
+            human.get("natural_open_vector_palm_ratio"),
+            f"{finger}.natural_open_vector_palm_ratio",
+        )
+        contact_vector = _optional_vector3(
+            human.get("contact_vector_palm_ratio"),
+            f"{finger}.contact_vector_palm_ratio",
+        )
+        if (open_vector is None) != (contact_vector is None):
+            raise ValueError(
+                f"fingertip contact {finger} needs both natural_open_vector_palm_ratio "
+                "and contact_vector_palm_ratio, or neither"
+            )
         profiles[finger] = FingertipContactProfile(
             finger=finger,
             natural_open_distance_p05_ratio=natural_open_distance,
             contact_distance_p95_ratio=contact_distance,
+            natural_open_vector_palm_ratio=open_vector,
+            contact_vector_palm_ratio=contact_vector,
             contact_command=command,
             override_slots=override_slots,
             max_command_delta=_nonnegative_int(robot.get("max_command_delta", 0), f"{finger}.max_command_delta"),
@@ -231,6 +288,14 @@ def parse_fingertip_contact_config(data: Any) -> FingertipContactConfig:
             runtime.get("phase_switch_sec", 0.08),
             "runtime.phase_switch_sec",
         ),
+        direction_gate_start_error_ratio=_nonnegative_float(
+            runtime.get("direction_gate_start_error_ratio", 0.25),
+            "runtime.direction_gate_start_error_ratio",
+        ),
+        direction_gate_zero_error_ratio=_direction_gate_zero_error(
+            runtime.get("direction_gate_zero_error_ratio", 0.55),
+            runtime.get("direction_gate_start_error_ratio", 0.25),
+        ),
     )
 
 
@@ -243,9 +308,15 @@ class FingertipContactFeatureExtractor:
 
     def reset(self) -> None:
         self._last_filtered: dict[str, float] = {}
+        self._last_filtered_vector: dict[str, np.ndarray] = {}
+        self._last_progress: dict[str, float] = {}
         self._last_time: float | None = None
 
-    def update(self, ratios: Mapping[str, float], now_sec: float) -> dict[str, FingertipContactFeature]:
+    def update(
+        self,
+        ratios: Mapping[str, float | FingertipContactMeasurement],
+        now_sec: float,
+    ) -> dict[str, FingertipContactFeature]:
         now = float(now_sec)
         elapsed = 0.0 if self._last_time is None else max(1e-6, min(0.10, now - self._last_time))
         alpha = self._config.distance_filter_alpha
@@ -253,14 +324,32 @@ class FingertipContactFeatureExtractor:
         for finger, value in ratios.items():
             if finger not in self._config.profiles:
                 continue
-            raw = float(value)
+            measurement = _contact_measurement(value)
+            raw = measurement.distance_ratio
             if not math.isfinite(raw) or raw < 0.0:
                 continue
             previous = self._last_filtered.get(finger)
             filtered = raw if previous is None else alpha * raw + (1.0 - alpha) * previous
-            velocity = 0.0 if previous is None or elapsed <= 0.0 else (filtered - previous) / elapsed
             profile = self._config.profiles[finger]
-            progress = _continuous_contact_progress(profile, filtered)
+            vector = _optional_np_vector(measurement.vector_palm_ratio)
+            filtered_vector: np.ndarray | None = None
+            if vector is not None:
+                previous_vector = self._last_filtered_vector.get(finger)
+                filtered_vector = vector if previous_vector is None else alpha * vector + (1.0 - alpha) * previous_vector
+                self._last_filtered_vector[finger] = filtered_vector
+            distance_progress = _continuous_contact_progress(profile, filtered)
+            progress, projected_progress, orthogonal_error, direction_gate = _directional_contact_progress(
+                self._config,
+                profile,
+                filtered_vector,
+                distance_progress,
+            )
+            previous_progress = self._last_progress.get(finger)
+            velocity = (
+                0.0
+                if previous_progress is None or elapsed <= 0.0
+                else (previous_progress - progress) / elapsed
+            )
             features[finger] = FingertipContactFeature(
                 finger=finger,
                 distance_raw=raw,
@@ -268,8 +357,22 @@ class FingertipContactFeatureExtractor:
                 progress=progress,
                 takeover_progress=_takeover_contact_progress(self._config, progress),
                 velocity=velocity,
+                distance_progress=distance_progress,
+                projected_progress=projected_progress,
+                orthogonal_error=orthogonal_error,
+                direction_gate=direction_gate,
+                vector_palm_ratio=(
+                    None
+                    if filtered_vector is None
+                    else (
+                        float(filtered_vector[0]),
+                        float(filtered_vector[1]),
+                        float(filtered_vector[2]),
+                    )
+                ),
             )
             self._last_filtered[finger] = filtered
+            self._last_progress[finger] = progress
         self._last_time = now
         return features
 
@@ -656,8 +759,8 @@ class FingertipContactController:
         self._smoother.reset()
 
     def apply(self, command: list[int], skeleton: Any, now_sec: float) -> tuple[list[int], FingertipContactDecision]:
-        ratios = thumb_fingertip_distance_ratios(skeleton)
-        features = self._extractor.update(ratios, now_sec)
+        measurements = thumb_fingertip_contact_measurements(skeleton)
+        features = self._extractor.update(measurements, now_sec)
         decision = self._intent.update(features, now_sec)
         if decision.pair is None or decision.activation <= 0.0:
             self._smoother.reset()
@@ -737,6 +840,54 @@ def _continuous_contact_progress(profile: FingertipContactProfile, distance_rati
     )
 
 
+def _directional_contact_progress(
+    config: FingertipContactConfig,
+    profile: FingertipContactProfile,
+    vector_palm_ratio: np.ndarray | None,
+    distance_progress: float,
+) -> tuple[float, float, float, float]:
+    if (
+        vector_palm_ratio is None
+        or profile.natural_open_vector_palm_ratio is None
+        or profile.contact_vector_palm_ratio is None
+    ):
+        amount = max(0.0, min(1.0, float(distance_progress)))
+        return amount, amount, 0.0, 1.0
+
+    open_vector = np.asarray(profile.natural_open_vector_palm_ratio, dtype=np.float64)
+    contact_vector = np.asarray(profile.contact_vector_palm_ratio, dtype=np.float64)
+    axis = open_vector - contact_vector
+    axis_norm = float(np.linalg.norm(axis))
+    if axis_norm <= 1e-8:
+        amount = max(0.0, min(1.0, float(distance_progress)))
+        return amount, amount, 0.0, 1.0
+
+    axis_unit = axis / axis_norm
+    current = np.asarray(vector_palm_ratio, dtype=np.float64)
+    open_to_current = open_vector - current
+    projected = max(0.0, min(1.0, float(np.dot(open_to_current, axis_unit) / axis_norm)))
+
+    closest_on_axis = open_vector - axis * projected
+    orthogonal_error = float(np.linalg.norm(current - closest_on_axis))
+    direction_gate = _direction_gate(
+        orthogonal_error,
+        config.direction_gate_start_error_ratio,
+        config.direction_gate_zero_error_ratio,
+    )
+    return projected * direction_gate, projected, orthogonal_error, direction_gate
+
+
+def _direction_gate(error: float, start: float, zero: float) -> float:
+    error = max(0.0, float(error))
+    start = max(0.0, float(start))
+    zero = max(start + 1e-8, float(zero))
+    if error <= start:
+        return 1.0
+    if error >= zero:
+        return 0.0
+    return 1.0 - (error - start) / (zero - start)
+
+
 def _takeover_contact_progress(config: FingertipContactConfig, progress: float) -> float:
     amount = max(0.0, min(1.0, float(progress)))
     if amount <= config.takeover_start_progress:
@@ -766,6 +917,64 @@ def _point(value: Any) -> np.ndarray:
     return point
 
 
+def _skeleton_palm_frame(skeleton: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    try:
+        index_mcp = _point(skeleton.index.mcp)
+        index_pip = _point(skeleton.index.pip)
+        middle_mcp = _point(skeleton.middle.mcp)
+        middle_pip = _point(skeleton.middle.pip)
+        ring_mcp = _point(skeleton.ring.mcp)
+        ring_pip = _point(skeleton.ring.pip)
+        pinky_mcp = _point(skeleton.pinky.mcp)
+        pinky_pip = _point(skeleton.pinky.pip)
+    except AttributeError:
+        return None
+
+    lateral = pinky_mcp - index_mcp
+    lateral_norm = float(np.linalg.norm(lateral))
+    if lateral_norm <= 1e-8:
+        return None
+    lateral = lateral / lateral_norm
+
+    roots = []
+    for mcp, pip in ((index_mcp, index_pip), (middle_mcp, middle_pip), (ring_mcp, ring_pip), (pinky_mcp, pinky_pip)):
+        vector = pip - mcp
+        norm = float(np.linalg.norm(vector))
+        if norm > 1e-8:
+            roots.append(vector / norm)
+    if not roots:
+        return None
+
+    forward = np.mean(roots, axis=0)
+    forward = forward - np.dot(forward, lateral) * lateral
+    forward_norm = float(np.linalg.norm(forward))
+    if forward_norm <= 1e-8:
+        return None
+    forward = forward / forward_norm
+
+    normal = np.cross(lateral, forward)
+    normal_norm = float(np.linalg.norm(normal))
+    if normal_norm <= 1e-8:
+        return None
+    normal = normal / normal_norm
+    return lateral, forward, normal
+
+
+def _contact_measurement(value: float | FingertipContactMeasurement) -> FingertipContactMeasurement:
+    if isinstance(value, FingertipContactMeasurement):
+        return value
+    return FingertipContactMeasurement(distance_ratio=float(value))
+
+
+def _optional_np_vector(value: tuple[float, float, float] | None) -> np.ndarray | None:
+    if value is None:
+        return None
+    vector = np.asarray(value, dtype=np.float64)
+    if vector.shape != (3,) or not np.all(np.isfinite(vector)):
+        return None
+    return vector
+
+
 def _positive_float(value: Any, name: str) -> float:
     result = _nonnegative_float(value, name)
     if result <= 0.0:
@@ -791,6 +1000,23 @@ def _finite_float(value: Any, default: float) -> float:
     if not math.isfinite(result):
         return float(default)
     return result
+
+
+def _optional_vector3(value: Any, name: str) -> tuple[float, float, float] | None:
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f"{name} must contain three finite values")
+    vector = tuple(float(item) for item in value)
+    if not all(math.isfinite(item) for item in vector):
+        raise ValueError(f"{name} must contain three finite values")
+    return vector
+
+
+def _direction_gate_zero_error(value: Any, start_value: Any) -> float:
+    start = _nonnegative_float(start_value, "runtime.direction_gate_start_error_ratio")
+    zero = _nonnegative_float(value, "runtime.direction_gate_zero_error_ratio")
+    return max(start + 1e-6, zero)
 
 
 def _unit_interval_float(value: Any, name: str) -> float:

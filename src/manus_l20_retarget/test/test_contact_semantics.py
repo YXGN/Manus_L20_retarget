@@ -15,6 +15,7 @@ from manus_l20_retarget.contact_semantics import (
     FINGERTIP_CONTACT_SLOTS,
     FingertipContactController,
     FingertipContactFeatureExtractor,
+    FingertipContactMeasurement,
     FingertipContactPhaseConfig,
     FingertipContactStateMachine,
     blend_fingertip_contact_command,
@@ -54,6 +55,8 @@ def _config_data() -> dict:
             "distance_filter_alpha": 1.0,
             "command_slew_per_cycle": 255,
             "phase_switch_sec": 0.08,
+            "direction_gate_start_error_ratio": 0.10,
+            "direction_gate_zero_error_ratio": 0.30,
         },
         "contacts": contacts,
     }
@@ -87,12 +90,16 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         data["runtime"]["distance_filter_alpha"] = 0.75
         data["runtime"]["command_slew_per_cycle"] = 32
         data["runtime"]["phase_switch_sec"] = 0.12
+        data["runtime"]["direction_gate_start_error_ratio"] = 0.20
+        data["runtime"]["direction_gate_zero_error_ratio"] = 0.60
 
         config = parse_fingertip_contact_config(data)
 
         self.assertAlmostEqual(config.distance_filter_alpha, 0.75)
         self.assertEqual(config.command_slew_per_cycle, 32)
         self.assertAlmostEqual(config.phase_switch_sec, 0.12)
+        self.assertAlmostEqual(config.direction_gate_start_error_ratio, 0.20)
+        self.assertAlmostEqual(config.direction_gate_zero_error_ratio, 0.60)
 
     def test_feature_extractor_filters_distance_before_progress_and_velocity(self) -> None:
         data = _config_data()
@@ -108,6 +115,57 @@ class FingertipContactSemanticsTest(unittest.TestCase):
         self.assertAlmostEqual(second.distance_filtered, 0.25)
         self.assertLess(first.velocity, 0.0)
         self.assertAlmostEqual(second.progress, (0.70 - 0.25) / (0.70 - 0.10))
+
+    def test_directional_projection_accepts_motion_along_calibrated_axis(self) -> None:
+        data = _config_data()
+        data["contacts"]["index"]["human"].update(
+            {
+                "natural_open_vector_palm_ratio": [0.0, 0.70, 0.0],
+                "contact_vector_palm_ratio": [0.0, 0.10, 0.0],
+            }
+        )
+        config = parse_fingertip_contact_config(data)
+        extractor = FingertipContactFeatureExtractor(config)
+
+        feature = extractor.update(
+            {
+                "index": FingertipContactMeasurement(
+                    distance_ratio=0.12,
+                    vector_palm_ratio=(0.0, 0.12, 0.0),
+                )
+            },
+            0.00,
+        )["index"]
+
+        self.assertGreater(feature.projected_progress, 0.95)
+        self.assertEqual(feature.direction_gate, 1.0)
+        self.assertGreater(feature.progress, 0.95)
+
+    def test_directional_projection_rejects_sideways_near_distance(self) -> None:
+        data = _config_data()
+        data["contacts"]["index"]["human"].update(
+            {
+                "natural_open_vector_palm_ratio": [0.0, 0.70, 0.0],
+                "contact_vector_palm_ratio": [0.0, 0.10, 0.0],
+            }
+        )
+        config = parse_fingertip_contact_config(data)
+        extractor = FingertipContactFeatureExtractor(config)
+
+        feature = extractor.update(
+            {
+                "index": FingertipContactMeasurement(
+                    distance_ratio=0.12,
+                    vector_palm_ratio=(0.40, 0.12, 0.0),
+                )
+            },
+            0.00,
+        )["index"]
+
+        self.assertGreater(feature.distance_progress, 0.95)
+        self.assertGreater(feature.projected_progress, 0.95)
+        self.assertEqual(feature.direction_gate, 0.0)
+        self.assertEqual(feature.progress, 0.0)
 
     def test_state_machine_latches_then_releases_with_named_state(self) -> None:
         config = parse_fingertip_contact_config(_config_data())

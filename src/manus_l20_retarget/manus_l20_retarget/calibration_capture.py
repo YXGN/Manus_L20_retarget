@@ -17,7 +17,7 @@ from rclpy.node import Node
 from .contact_semantics import (
     FINGERTIP_CONTACT_FINGERS,
     FINGERTIP_CONTACT_SLOTS,
-    thumb_fingertip_distance_ratios,
+    thumb_fingertip_contact_measurements,
 )
 from .manus_landmarks import manus_raw_nodes_to_hand_skeleton, manus_raw_nodes_to_mediapipe_landmarks
 from .manus_l20_retarget_node import (
@@ -167,7 +167,7 @@ class FingertipContactCapture(Node):
         self._transform = transform
         self._lock = threading.Lock()
         self._collecting = False
-        self._samples: list[dict[str, float]] = []
+        self._samples: list[dict[str, dict[str, Any]]] = []
         self._discarded_frames = 0
         self._last_invalid_frame_warning_sec = float("-inf")
         self.create_subscription(ManusGlove, glove_topic, self._on_glove, 10)
@@ -175,7 +175,14 @@ class FingertipContactCapture(Node):
     def _on_glove(self, msg: ManusGlove) -> None:
         try:
             skeleton = manus_raw_nodes_to_hand_skeleton(msg.raw_nodes, transform=self._transform)
-            ratios = thumb_fingertip_distance_ratios(skeleton)
+            measurements = thumb_fingertip_contact_measurements(skeleton)
+            sample = {
+                finger: {
+                    "distance": measurement.distance_ratio,
+                    "vector": measurement.vector_palm_ratio,
+                }
+                for finger, measurement in measurements.items()
+            }
         except (AttributeError, TypeError, ValueError) as exc:
             now_sec = time.monotonic()
             with self._lock:
@@ -192,9 +199,9 @@ class FingertipContactCapture(Node):
             return
         with self._lock:
             if self._collecting:
-                self._samples.append(ratios)
+                self._samples.append(sample)
 
-    def capture(self, duration_sec: float) -> dict[str, list[float]]:
+    def capture(self, duration_sec: float) -> dict[str, dict[str, list[Any]]]:
         with self._lock:
             self._samples = []
             self._discarded_frames = 0
@@ -210,10 +217,12 @@ class FingertipContactCapture(Node):
                 f"in {duration_sec:.1f}s; discarded {discarded_frames} incomplete frames. "
                 "Verify that the MANUS glove is connected and raw skeleton streaming is enabled."
             )
-        return {
-            finger: [float(sample[finger]) for sample in samples if finger in sample]
-            for finger in FINGERTIP_CONTACT_FINGERS
-        }
+        result: dict[str, dict[str, list[Any]]] = {}
+        for finger in FINGERTIP_CONTACT_FINGERS:
+            distances = [float(sample[finger]["distance"]) for sample in samples if finger in sample]
+            vectors = [sample[finger]["vector"] for sample in samples if finger in sample and sample[finger]["vector"] is not None]
+            result[finger] = {"distance": distances, "vector": vectors}
+        return result
 
 
 def _mean_vector(samples: list[list[float]]) -> list[float]:
@@ -222,6 +231,22 @@ def _mean_vector(samples: list[list[float]]) -> list[float]:
         round(float(statistics.fmean(sample[index] for sample in samples)), 6)
         for index in range(length)
     ]
+
+
+def _mean_optional_vector(samples: list[Any]) -> list[float] | None:
+    vectors = []
+    for sample in samples:
+        if sample is None:
+            continue
+        try:
+            vector = [float(value) for value in sample]
+        except (TypeError, ValueError):
+            continue
+        if len(vector) == 3 and all(math.isfinite(value) for value in vector):
+            vectors.append(vector)
+    if not vectors:
+        return None
+    return _mean_vector(vectors)
 
 
 def _mean_ergonomics(samples: list[dict[str, Any]]) -> dict[str, float]:
@@ -406,7 +431,7 @@ def _build_thumb_flexion_ergonomics_calibration(
 
 
 def _build_fingertip_contact_calibration(
-    samples: dict[str, dict[str, list[float]]],
+    samples: dict[str, dict[str, dict[str, list[Any]]]],
     output_path: str,
     *,
     min_hold_sec: float,
@@ -424,8 +449,10 @@ def _build_fingertip_contact_calibration(
     open_samples = samples["natural_open"]
     contacts: dict[str, Any] = {}
     for finger in FINGERTIP_CONTACT_FINGERS:
-        contact_samples = samples[f"thumb_{finger}_tip_touch"][finger]
-        open_values = open_samples[finger]
+        contact_entry = samples[f"thumb_{finger}_tip_touch"][finger]
+        open_entry = open_samples[finger]
+        contact_samples = [float(value) for value in contact_entry.get("distance", [])]
+        open_values = [float(value) for value in open_entry.get("distance", [])]
         if not contact_samples or not open_values:
             raise RuntimeError(f"no fingertip distance samples for {finger}")
         contact_median = _percentile(contact_samples, 0.50)
@@ -435,12 +462,18 @@ def _build_fingertip_contact_calibration(
             raise RuntimeError(
                 f"{finger} contact and natural-open raw distances overlap; recapture with a clearer open hand"
             )
+        human = {
+            "natural_open_distance_p05_ratio": round(open_p05, 6),
+            "contact_distance_median_ratio": round(contact_median, 6),
+            "contact_distance_p95_ratio": round(contact_p95, 6),
+        }
+        open_vector = _mean_optional_vector(open_entry.get("vector", []))
+        contact_vector = _mean_optional_vector(contact_entry.get("vector", []))
+        if open_vector is not None and contact_vector is not None:
+            human["natural_open_vector_palm_ratio"] = open_vector
+            human["contact_vector_palm_ratio"] = contact_vector
         contacts[finger] = {
-            "human": {
-                "natural_open_distance_p05_ratio": round(open_p05, 6),
-                "contact_distance_median_ratio": round(contact_median, 6),
-                "contact_distance_p95_ratio": round(contact_p95, 6),
-            },
+            "human": human,
             "robot": {
                 "override_slots": list(_fingertip_contact_slots(finger)),
                 "max_command_delta": int(max_command_delta),
@@ -450,9 +483,10 @@ def _build_fingertip_contact_calibration(
     return {
         "schema": "manus_l20.fingertip_contact_semantics.v2",
         "source": {
-            "kind": "raw_skeleton_tip_distance",
+            "kind": "raw_skeleton_tip_directional_projection",
             "numerator": "Thumb.TIP to Finger.TIP",
             "denominator": "Index.MCP to Pinky.MCP",
+            "frame": "palm_local_lateral_forward_normal",
             "unit": "palm_width_ratio",
         },
         "runtime": {
@@ -468,6 +502,8 @@ def _build_fingertip_contact_calibration(
             "distance_filter_alpha": round(float(distance_filter_alpha), 4),
             "command_slew_per_cycle": int(command_slew_per_cycle),
             "phase_switch_sec": round(float(phase_switch_sec), 4),
+            "direction_gate_start_error_ratio": 0.25,
+            "direction_gate_zero_error_ratio": 0.55,
         },
         "contacts": contacts,
     }
@@ -836,7 +872,7 @@ class FingertipContactCalibrationSession:
             )
             for finger in FINGERTIP_CONTACT_FINGERS
         }
-        self.samples: dict[str, dict[str, list[float]]] = {}
+        self.samples: dict[str, dict[str, dict[str, list[Any]]]] = {}
         self._node: FingertipContactCapture | None = None
         self._spin_thread: threading.Thread | None = None
 
@@ -856,7 +892,7 @@ class FingertipContactCalibrationSession:
             self._spin_thread = None
             raise
 
-    def capture_pose(self, label: str) -> dict[str, list[float]]:
+    def capture_pose(self, label: str) -> dict[str, dict[str, list[Any]]]:
         if label not in dict(FINGERTIP_CONTACT_POSES):
             raise ValueError(f"unknown fingertip-contact pose: {label}")
         self.start()

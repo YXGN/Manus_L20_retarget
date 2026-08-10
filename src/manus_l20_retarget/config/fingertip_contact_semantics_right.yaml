@@ -17,6 +17,8 @@ runtime:
   distance_filter_alpha: 0.85
   command_slew_per_cycle: 255
   phase_switch_sec: 0.25
+  direction_gate_start_error_ratio: 0.25
+  direction_gate_zero_error_ratio: 0.55
 contacts:
   index:
     human:

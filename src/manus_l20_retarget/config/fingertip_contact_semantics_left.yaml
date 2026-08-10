@@ -1,28 +1,39 @@
 schema: manus_l20.fingertip_contact_semantics.v2
 source:
-  kind: raw_skeleton_tip_distance
+  kind: raw_skeleton_tip_directional_projection
   numerator: Thumb.TIP to Finger.TIP
   denominator: Index.MCP to Pinky.MCP
+  frame: palm_local_lateral_forward_normal
   unit: palm_width_ratio
 runtime:
   enabled: true
-  min_hold_sec: 0.0
+  min_hold_sec: 0.1
   release_hold_sec: 0.05
   candidate_gap_ratio: 0.02
   takeover_start_progress: 0.35
   release_start_progress_delta: 0.06
   reclose_start_progress_delta: 0.005
-  activation_rise_sec: 0.0
+  activation_rise_sec: 0.04
   activation_release_sec: 0.25
   distance_filter_alpha: 0.85
   command_slew_per_cycle: 255
   phase_switch_sec: 0.25
+  direction_gate_start_error_ratio: 0.25
+  direction_gate_zero_error_ratio: 0.55
 contacts:
   index:
     human:
-      natural_open_distance_p05_ratio: 2.538153
-      contact_distance_median_ratio: 0.068088
-      contact_distance_p95_ratio: 0.075054
+      natural_open_distance_p05_ratio: 2.561266
+      contact_distance_median_ratio: 0.154044
+      contact_distance_p95_ratio: 0.159872
+      natural_open_vector_palm_ratio:
+      - -1.352727
+      - -2.125008
+      - 0.531886
+      contact_vector_palm_ratio:
+      - 0.085048
+      - 0.111821
+      - 0.062626
     robot:
       override_slots:
       - 0
